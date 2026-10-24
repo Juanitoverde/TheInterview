@@ -65,6 +65,14 @@ struct SettingsView: View {
                     Text("Your key is stored in this device's Keychain. With a key, questions are written for the role you name and your answers are evaluated by OpenAI. Without one, TheInterview uses its built-in questions and on-device scoring.")
                 }
 
+                Section {
+                    Toggle("Follow-up questions", isOn: $model.settings.asksFollowUpQuestions)
+                } header: {
+                    Text("Interviewer")
+                } footer: {
+                    Text("When an answer is vague, lacks an example or leaves out the outcome, the interviewer asks a follow-up, up to twice per interview.")
+                }
+
                 Section("Voices and timing") {
                     VStack(alignment: .leading) {
                         Text("Speaking speed")

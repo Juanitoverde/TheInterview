@@ -105,9 +105,20 @@ final class OfficeStage: StageDirecting {
         interviewer.setTalking(speaker == .interviewer)
     }
 
-    /// Lowers the office ambience while the microphone is listening.
+    /// Lowers the office ambience while the microphone is listening, and has the characters listen attentively.
     func setListening(_ listening: Bool) {
         ambience?.fade(to: listening ? -26 : -14, duration: 0.6)
+        receptionist.setAttentive(listening)
+        interviewer.setAttentive(listening)
+    }
+
+    /// Where a character's voice should come from, or nil if they've left the scene.
+    func voiceSource(for speaker: Speaker) -> Entity? {
+        switch speaker {
+        case .receptionist: receptionist.root.isEnabled ? receptionist.voiceSource : nil
+        case .interviewer: interviewer.voiceSource
+        case .candidate: nil
+        }
     }
 
     // MARK: StageDirecting

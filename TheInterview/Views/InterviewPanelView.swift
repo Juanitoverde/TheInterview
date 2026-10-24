@@ -37,7 +37,7 @@ struct InterviewPanelView: View {
                 Text(state.phase.title)
                     .font(.headline)
                 if state.phase.isInQuestions, let number = state.questionNumber, state.questionCount > 0 {
-                    Text("Question \(number) of \(state.questionCount)")
+                    Text(state.isFollowUp ? "Follow-up on question \(number) of \(state.questionCount)" : "Question \(number) of \(state.questionCount)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -84,7 +84,7 @@ struct InterviewPanelView: View {
                     .frame(width: 42, height: 36)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(prompt(for: state.listeningPurpose))
+                Text(state.isFollowUp && state.listeningPurpose == .answer ? "Answer the follow-up. Say “that's my answer” or tap Done when finished" : prompt(for: state.listeningPurpose))
                     .font(.headline)
                 Text(state.liveTranscript.isEmpty ? (model.isVoiceInputAvailable ? "Listening…" : "Type your reply below.") : state.liveTranscript)
                     .foregroundStyle(state.liveTranscript.isEmpty ? .secondary : .primary)

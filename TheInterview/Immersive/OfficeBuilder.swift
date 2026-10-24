@@ -35,8 +35,8 @@ struct OfficeBuilder {
         static let wall: UInt32 = 0xE9E6E1
         static let ceiling: UInt32 = 0xF4F3F0
         static let stone: UInt32 = 0xD9D4CC
-        static let carpet: UInt32 = 0x6E737B
-        static let corridor: UInt32 = 0xA39D95
+        static let carpet: UInt32 = 0x5F6670
+        static let corridor: UInt32 = 0xB5A089
         static let woodFloor: UInt32 = 0xA67B5B
         static let wood: UInt32 = 0x8B5E3C
         static let lightWood: UInt32 = 0xB8875A
@@ -47,6 +47,7 @@ struct OfficeBuilder {
         static let screen: UInt32 = 0x9CC3E6
         static let lightPanel: UInt32 = 0xFFFDF6
         static let window: UInt32 = 0xD4E7F5
+        static let skirting: UInt32 = 0xF7F6F2
     }
 
     let companyName: String
@@ -61,14 +62,15 @@ struct OfficeBuilder {
         buildLighting(world)
 
         let receptionist = CharacterRig(appearance: CharacterAppearance(
-            skin: 0xC68863, hair: 0x2B1B12, hairStyle: .long, top: Palette.teal, bottom: 0x2E2E36, scale: 0.96, build: 0.92
+            skin: 0xC68863, hair: 0x2B1B12, hairStyle: .long, top: Palette.teal, bottom: 0x2E2E36, eyes: 0x3B2A1E, scale: 0.96, build: 0.92
         ))
         receptionist.place(at: Layout.receptionistStart, yaw: 0)
         receptionist.setLooksAtUser(true)
         world.addChild(receptionist.root)
 
         let interviewer = CharacterRig(appearance: CharacterAppearance(
-            skin: 0xE0B394, hair: 0x3B2F2A, hairStyle: .short, top: 0x2F3A4A, bottom: 0x2F3A4A, tie: 0x8C2F39, build: 1.05
+            skin: 0xE0B394, hair: 0x3B2F2A, hairStyle: .short, top: 0xF2F2F0, bottom: 0x2F3A4A, tie: 0x8C2F39, jacket: 0x2F3A4A,
+            eyes: 0x56708C, build: 1.05
         ))
         interviewer.place(at: Layout.interviewerChair, yaw: 0)
         // Writing notes until the candidate arrives.
@@ -82,10 +84,14 @@ struct OfficeBuilder {
 
     private func buildShell(_ world: Entity) {
         // Floors
-        floor(world, center: [0, 0, -1], width: 9, depth: 8, color: Palette.stone, roughness: 0.5)
-        floor(world, center: [-0.65, 0, -10], width: 7.7, depth: 10, color: Palette.carpet, roughness: 1)
-        floor(world, center: [2.2, 0.002, -10], width: 2, depth: 10, color: Palette.corridor, roughness: 0.7)
-        floor(world, center: [1.75, 0, -18], width: 6, depth: 6, color: Palette.woodFloor, roughness: 0.55)
+        floor(world, center: [0, 0, -1], width: 9, depth: 8, material: Materials.textured(
+            ProceduralTextures.tiles(width: 9, depth: 8, tileSize: 0.8, base: Palette.stone, grout: 0xBDB6AC), fallback: Palette.stone, roughness: 0.45))
+        floor(world, center: [-0.65, 0, -10], width: 7.7, depth: 10, material: Materials.textured(
+            ProceduralTextures.carpet(width: 7.7, depth: 10, base: Palette.carpet), fallback: Palette.carpet, roughness: 1))
+        floor(world, center: [2.2, 0.002, -10], width: 2, depth: 10, material: Materials.textured(
+            ProceduralTextures.woodPlanks(width: 2, depth: 10, base: Palette.corridor, seed: 2), fallback: Palette.corridor, roughness: 0.6))
+        floor(world, center: [1.75, 0, -18], width: 6, depth: 6, material: Materials.textured(
+            ProceduralTextures.woodPlanks(width: 6, depth: 6, base: Palette.woodFloor), fallback: Palette.woodFloor, roughness: 0.5))
 
         // Ceilings
         ceiling(world, center: [0, 3, -1], width: 9, depth: 8)
@@ -126,13 +132,27 @@ struct OfficeBuilder {
         world.add(makeModel(Meshes.box(4.85, 0.05, 0.1), frame, at: [1.75, 0.85, -21]))
         world.add(makeModel(Meshes.box(4.85, 0.05, 0.1), frame, at: [1.75, 2.65, -21]))
         world.add(makeModel(Meshes.box(4.9, 0.04, 0.3), Materials.matte(Palette.white), at: [1.75, 0.87, -20.85]))
+
+        // Skirting boards along the inner faces of the walls.
+        skirting(world, z: -4.94...2.94, x: -4.43)
+        skirting(world, z: -4.94...2.94, x: 4.43)
+        skirting(world, x: -4.44...4.44, z: 2.93)
+        skirting(world, x: -4.44...1.2, z: -4.93)
+        skirting(world, x: 3.2...4.44, z: -4.93)
+        skirting(world, z: -14.94 ... -5.06, x: -4.43)
+        skirting(world, z: -14.94 ... -5.06, x: 3.13)
+        skirting(world, x: -4.44...1.6, z: -14.93)
+        skirting(world, z: -20.94 ... -15.06, x: -1.18)
+        skirting(world, z: -20.94 ... -15.06, x: 4.68)
+        skirting(world, x: -1.19...1.6, z: -15.07)
+        skirting(world, x: 2.8...4.69, z: -15.07)
     }
 
     // MARK: Lobby
 
     private func buildLobby(_ world: Entity) {
         // Feature wall with the company name behind the receptionist.
-        world.add(makeModel(Meshes.box(2.8, 2.6, 0.15), Materials.matte(Palette.wood, roughness: 0.6), at: [-0.2, 1.3, -3.9], shadow: true))
+        world.add(makeModel(Meshes.box(2.8, 2.6, 0.15), Materials.textured(ProceduralTextures.woodGrain(base: Palette.wood), fallback: Palette.wood, roughness: 0.55), at: [-0.2, 1.3, -3.9], shadow: true))
         let logo = makeTextLabel(companyName.uppercased(), size: 0.2, weight: .bold, color: 0xF5EBDD, depth: 0.02)
         logo.position = [-0.2, 1.95, -3.815]
         world.addChild(logo)
@@ -143,7 +163,7 @@ struct OfficeBuilder {
 
         // Reception desk.
         world.add(makeModel(Meshes.box(2.4, 1.05, 0.7, radius: 0.03), Materials.matte(Palette.white, roughness: 0.5), at: [0, 0.525, -2.0], shadow: true))
-        world.add(makeModel(Meshes.box(2.5, 0.05, 0.38, radius: 0.015), Materials.gloss(Palette.lightWood, roughness: 0.35), at: [0, 1.1, -1.72], shadow: true))
+        world.add(makeModel(Meshes.box(2.5, 0.05, 0.38, radius: 0.015), Materials.textured(ProceduralTextures.woodGrain(base: Palette.lightWood), fallback: Palette.lightWood, roughness: 0.35), at: [0, 1.1, -1.72], shadow: true))
         world.add(makeModel(Meshes.box(2.42, 0.08, 0.02), Materials.matte(Palette.teal), at: [0, 0.75, -1.645]))
         // Monitor facing the receptionist.
         world.add(makeModel(Meshes.box(0.56, 0.34, 0.03, radius: 0.01), Materials.gloss(Palette.charcoal), at: [-0.55, 1.33, -2.2]))
@@ -162,7 +182,8 @@ struct OfficeBuilder {
         world.add(makeModel(Meshes.box(0.2, 0.02, 0.14), Materials.matte(0x2F6F8F), at: [-0.75, 1.135, -1.7]))
 
         // Waiting area: sofa, coffee table, rug.
-        world.add(makeModel(Meshes.box(2.2, 0.01, 2.8), Materials.matte(0x8C8579, roughness: 1), at: [-3.2, 0.006, -1]))
+        world.add(makeModel(Meshes.floor(2.2, 2.8), Materials.textured(
+            ProceduralTextures.rug(width: 2.2, depth: 2.8, base: 0x8C8579, border: 0x4A4038, accent: 0xC9A66B), fallback: 0x8C8579, roughness: 1), at: [-3.2, 0.006, -1]))
         let sofa = Materials.matte(Palette.fabric)
         world.add(makeModel(Meshes.box(0.8, 0.42, 2.0, radius: 0.06), sofa, at: [-3.75, 0.21, -1], shadow: true))
         world.add(makeModel(Meshes.box(0.22, 0.5, 2.0, radius: 0.06), sofa, at: [-4.1, 0.65, -1], shadow: true))
@@ -210,11 +231,11 @@ struct OfficeBuilder {
 
     private func buildOpenPlanOffice(_ world: Entity) -> (colleagues: [CharacterRig], chatPair: (CharacterRig, CharacterRig)) {
         let looks: [CharacterAppearance] = [
-            CharacterAppearance(skin: 0x8D5524, hair: 0x111111, hairStyle: .short, top: 0xE2E2DC, bottom: 0x2E3440),
+            CharacterAppearance(skin: 0x8D5524, hair: 0x111111, hairStyle: .curly, top: 0xE2E2DC, bottom: 0x2E3440),
             CharacterAppearance(skin: 0xF1C27D, hair: 0x6B4423, hairStyle: .bun, top: 0x7A4E8A, bottom: 0x2E2E2E, scale: 0.95, build: 0.9),
-            CharacterAppearance(skin: 0xE0AC69, hair: 0x2A2A2A, hairStyle: .short, top: 0x4C7A5A, bottom: 0x3B3B45),
+            CharacterAppearance(skin: 0xE0AC69, hair: 0x2A2A2A, hairStyle: .short, top: 0xDCE6F0, bottom: 0x3B3B45, jacket: 0x4A4F57),
             CharacterAppearance(skin: 0xC68642, hair: 0x1B1B1B, hairStyle: .long, top: 0xD97B4A, bottom: 0x2E2E36, scale: 0.94, build: 0.9),
-            CharacterAppearance(skin: 0xFFDBAC, hair: 0xB08850, hairStyle: .short, top: 0x5577AA, bottom: 0x2B2B2B),
+            CharacterAppearance(skin: 0xFFDBAC, hair: 0xB08850, hairStyle: .short, top: 0x5577AA, bottom: 0x2B2B2B, eyes: 0x4F7A5A),
         ]
         // Desk centres; every desk but one has someone working at it.
         let desks: [(SIMD3<Float>, Bool)] = [
@@ -237,14 +258,11 @@ struct OfficeBuilder {
         }
 
         // Two colleagues chatting in the aisle; one holds a coffee.
-        let first = CharacterRig(appearance: CharacterAppearance(skin: 0xD9A066, hair: 0x3D2B1F, hairStyle: .short, top: 0x8A9BA8, bottom: 0x23262B))
+        let first = CharacterRig(appearance: CharacterAppearance(skin: 0xD9A066, hair: 0x3D2B1F, hairStyle: .short, top: 0xF0EEE8, bottom: 0x23262B, jacket: 0x6B7F8E))
         first.place(at: [-1.85, 0, -11.15], yaw: .pi)
         let second = CharacterRig(appearance: CharacterAppearance(skin: 0xA66E4E, hair: 0x101010, hairStyle: .bun, top: 0xC44E5F, bottom: 0x2B2B33, scale: 0.95, build: 0.9))
         second.place(at: [-1.85, 0, -11.85], yaw: 0)
-        second.joints.rightElbow.orientation = simd_quatf(angle: -1.3, axis: [1, 0, 0])
-        let mug = makeModel(Meshes.cylinder(height: 0.1, radius: 0.04), Materials.gloss(0xFAFAFA), at: [0, -0.3, 0.045])
-        mug.orientation = simd_quatf(angle: 1.3, axis: [1, 0, 0])
-        second.joints.rightElbow.addChild(mug)
+        second.hold(makeModel(Meshes.cylinder(height: 0.1, radius: 0.04), Materials.gloss(0xFAFAFA)))
         for person in [first, second] {
             person.setLooksAtUser(false)
             world.addChild(person.root)
@@ -311,10 +329,11 @@ struct OfficeBuilder {
     // MARK: Interview room
 
     private func buildInterviewRoom(_ world: Entity) {
-        world.add(makeModel(Meshes.box(3.2, 0.008, 2.6), Materials.matte(0x8E8476, roughness: 1), at: [1.75, 0.004, -18.2]))
+        world.add(makeModel(Meshes.floor(3.2, 2.6), Materials.textured(
+            ProceduralTextures.rug(width: 3.2, depth: 2.6, base: 0x7D6E5D, border: 0x3E3A36, accent: 0xB89A6A), fallback: 0x7D6E5D, roughness: 1), at: [1.75, 0.004, -18.2]))
 
         // Desk: top, side panels and a modesty panel facing the candidate.
-        let deskWood = Materials.gloss(Palette.wood, roughness: 0.35)
+        let deskWood = Materials.textured(ProceduralTextures.woodGrain(base: Palette.wood), fallback: Palette.wood, roughness: 0.35)
         world.add(makeModel(Meshes.box(1.8, 0.05, 0.85, radius: 0.012), deskWood, at: [1.75, 0.75, -18.3], shadow: true))
         world.add(makeModel(Meshes.box(0.05, 0.73, 0.8), deskWood, at: [0.9, 0.365, -18.3], shadow: true))
         world.add(makeModel(Meshes.box(0.05, 0.73, 0.8), deskWood, at: [2.6, 0.365, -18.3], shadow: true))
@@ -440,12 +459,13 @@ struct OfficeBuilder {
 
     // MARK: Pieces
 
-    private func floor(_ world: Entity, center: SIMD3<Float>, width: Float, depth: Float, color: UInt32, roughness: Float) {
-        world.add(makeModel(Meshes.floor(width, depth), Materials.matte(color, roughness: roughness), at: center))
+    private func floor(_ world: Entity, center: SIMD3<Float>, width: Float, depth: Float, material: RealityKit.Material) {
+        world.add(makeModel(Meshes.floor(width, depth), material, at: center))
     }
 
     private func ceiling(_ world: Entity, center: SIMD3<Float>, width: Float, depth: Float) {
-        let ceiling = makeModel(Meshes.floor(width, depth), Materials.matte(Palette.ceiling), at: center)
+        let tiles = ProceduralTextures.tiles(width: width, depth: depth, tileSize: 0.6, base: Palette.ceiling, grout: 0xD9D7D2, variation: 0.01, speckle: false)
+        let ceiling = makeModel(Meshes.floor(width, depth), Materials.textured(tiles, fallback: Palette.ceiling, roughness: 0.9), at: center)
         // Planes face up; flip it so it's visible from below.
         ceiling.orientation = simd_quatf(angle: .pi, axis: [1, 0, 0])
         world.addChild(ceiling)
@@ -453,6 +473,18 @@ struct OfficeBuilder {
 
     private func wall(_ world: Entity, center: SIMD3<Float>, size: SIMD3<Float>, color: UInt32 = Palette.wall) {
         world.add(makeModel(Meshes.box(size.x, size.y, size.z), Materials.matte(color), at: center))
+    }
+
+    /// A skirting board along a wall that runs in X, at the wall's inner face `z`.
+    private func skirting(_ world: Entity, x: ClosedRange<Float>, z: Float) {
+        let length = x.upperBound - x.lowerBound
+        world.add(makeModel(Meshes.box(length, 0.1, 0.02), Materials.matte(Palette.skirting, roughness: 0.5), at: [(x.lowerBound + x.upperBound) / 2, 0.05, z]))
+    }
+
+    /// A skirting board along a wall that runs in Z, at the wall's inner face `x`.
+    private func skirting(_ world: Entity, z: ClosedRange<Float>, x: Float) {
+        let length = z.upperBound - z.lowerBound
+        world.add(makeModel(Meshes.box(0.02, 0.1, length), Materials.matte(Palette.skirting, roughness: 0.5), at: [x, 0.05, (z.lowerBound + z.upperBound) / 2]))
     }
 
     private func lightPanels(_ world: Entity, xs: [Float], zs: [Float]) {

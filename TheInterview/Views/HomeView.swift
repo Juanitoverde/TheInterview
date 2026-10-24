@@ -56,7 +56,7 @@ struct HomeView: View {
                 FeatureRow(systemImage: "building.2", title: "Step into the office",
                            text: "Check in at reception, follow the receptionist down the corridor and meet your interviewer.")
                 FeatureRow(systemImage: "sparkles", title: "Fresh questions every time",
-                           text: "Questions are written for the exact role you name, so no two interviews are the same.")
+                           text: "Questions are written for the exact role you name, and the interviewer follows up when an answer is vague.")
                 FeatureRow(systemImage: "waveform", title: "Answer out loud",
                            text: "Speak naturally. Say “that's my answer” or tap Done when you've finished.")
                 FeatureRow(systemImage: "eye", title: "Eye-contact feedback",

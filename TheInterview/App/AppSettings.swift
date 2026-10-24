@@ -12,6 +12,8 @@ struct AppSettings: Codable, Equatable {
     var companyName = "Meridian Works"
     var openAIModel = OpenAIClient.defaultModel
     var usesAIReactions = true
+    /// Lets the interviewer probe vague answers with follow-up questions.
+    var asksFollowUpQuestions = true
     /// Fade between rooms instead of the guided walk, for people sensitive to motion in VR.
     var comfortMode = false
     /// Shows a small live indicator of whether you're facing the interviewer.
@@ -22,6 +24,35 @@ struct AppSettings: Codable, Equatable {
     var answerSilenceTimeout = 5.0
 
     private static let defaultsKey = "TheInterview.settings"
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case candidateName, formOfAddress, presetPosition, questionCount, difficulty, focus, companyName, openAIModel
+        case usesAIReactions, asksFollowUpQuestions, comfortMode, showsLiveEyeContact, speechRate, answerSilenceTimeout
+    }
+
+    /// Decodes saved settings, keeping defaults for anything missing so new settings don't reset old ones.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
+            (try? container.decodeIfPresent(T.self, forKey: key)) ?? fallback
+        }
+        candidateName = value(.candidateName, candidateName)
+        formOfAddress = value(.formOfAddress, formOfAddress)
+        presetPosition = value(.presetPosition, presetPosition)
+        questionCount = value(.questionCount, questionCount)
+        difficulty = value(.difficulty, difficulty)
+        focus = value(.focus, focus)
+        companyName = value(.companyName, companyName)
+        openAIModel = value(.openAIModel, openAIModel)
+        usesAIReactions = value(.usesAIReactions, usesAIReactions)
+        asksFollowUpQuestions = value(.asksFollowUpQuestions, asksFollowUpQuestions)
+        comfortMode = value(.comfortMode, comfortMode)
+        showsLiveEyeContact = value(.showsLiveEyeContact, showsLiveEyeContact)
+        speechRate = value(.speechRate, speechRate)
+        answerSilenceTimeout = value(.answerSilenceTimeout, answerSilenceTimeout)
+    }
 
     static func load(from defaults: UserDefaults = .standard) -> AppSettings {
         guard let data = defaults.data(forKey: defaultsKey),
@@ -50,6 +81,7 @@ struct AppSettings: Codable, Equatable {
             companyName: company.isEmpty ? "Meridian Works" : company,
             presetPosition: position.isEmpty ? nil : position,
             usesAIReactions: usesAIReactions,
+            maxFollowUps: asksFollowUpQuestions ? 2 : 0,
             answerSilenceTimeout: answerSilenceTimeout
         )
     }

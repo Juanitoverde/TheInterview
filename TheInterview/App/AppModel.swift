@@ -51,6 +51,7 @@ final class AppModel {
         speechInput.onLevel = { [weak self] level in self?.micLevel = level }
         speechInput.onVoiceAvailabilityChange = { [weak self] available in self?.isVoiceInputAvailable = available }
         speechOutput.onSpeakingChange = { [weak self] speaker in self?.stage?.setSpeaking(speaker) }
+        speechOutput.voiceSource = { [weak self] speaker in self?.stage?.voiceSource(for: speaker) }
         attentionTracker.onEngagementChange = { [weak self] engaged in self?.liveEngagement = engaged }
     }
 

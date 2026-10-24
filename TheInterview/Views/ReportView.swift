@@ -163,6 +163,7 @@ private struct FeedbackCard: View {
 private struct QuestionCard: View {
     let feedback: QuestionFeedback
     @State private var showsAnswer = false
+    @State private var showsExample = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -185,10 +186,23 @@ private struct QuestionCard: View {
                 .accessibilityHidden(true)
 
             DisclosureGroup("Your answer", isExpanded: $showsAnswer) {
-                Text(feedback.answer.isEmpty ? "No answer was captured." : feedback.answer)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(feedback.answer.isEmpty ? "No answer was captured." : feedback.answer)
+                        .foregroundStyle(.secondary)
+                    if let followUp = feedback.followUpQuestion {
+                        Text("Follow-up: \(followUp)")
+                            .font(.subheadline.weight(.semibold))
+                        Text(feedback.followUpAnswer?.isEmpty == false ? feedback.followUpAnswer ?? "" : "No answer was captured.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 6)
+            }
+            if feedback.followUpQuestion != nil && !showsAnswer {
+                Label("The interviewer asked a follow-up", systemImage: "arrow.turn.down.right")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 6)
             }
 
             Text(feedback.feedback)
@@ -199,6 +213,16 @@ private struct QuestionCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: "lightbulb")
+                }
+            }
+
+            if let example = feedback.exampleAnswer {
+                DisclosureGroup("A stronger answer might sound like", isExpanded: $showsExample) {
+                    Text(example)
+                        .italic()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 6)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 

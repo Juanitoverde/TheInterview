@@ -8,8 +8,8 @@ The original product vision is in [`temp_info_placeholder.txt`](temp_info_placeh
 
 1. **Reception.** The office fades in around you. Ava, the receptionist, waves and greets you by name: *"What position are you applying for today, Ms. Rivera?"* You answer out loud, for example *"I'm applying for a Technical Mechanic."*
 2. **The walk.** *"Oh, I see your appointment right here. Follow me this way."* She leads you down the corridor past colleagues at their desks and into the interview room. Turn on **Comfort mode** for a fade instead of the walk.
-3. **The interview.** Daniel Park stands to greet you, sits, and asks *"Are you ready to begin?"* He then asks questions written for the role you named, reacting briefly after each answer. Say *"that's my answer"*, pause, or tap **Done** to finish an answer. You can also ask him to repeat a question, or type instead of speaking.
-4. **The report.** You get an overall score, eye-contact percentage, speaking pace, filler words and speaking time. There's a list of strengths and things to work on, and every question gets a score, feedback and a concrete tip. Reports are saved and can be shared as text.
+3. **The interview.** Daniel Park stands to greet you, sits, and asks *"Are you ready to begin?"* He then asks questions written for the role you named. While you answer he listens attentively, nodding now and then. When an answer is vague, lacks an example or leaves out the outcome, he follows up (*"And what was the outcome?"*), up to twice per interview. Say *"that's my answer"*, pause, or tap **Done** to finish an answer. You can also ask him to repeat a question, or type instead of speaking.
+4. **The report.** You get an overall score, eye-contact percentage, speaking pace, filler words and speaking time. There's a list of strengths and things to work on. Every question gets a score, feedback, a concrete tip and, with OpenAI, an example of how a stronger answer might sound. Reports are saved and can be shared as text.
 
 ## Requirements
 
@@ -57,13 +57,20 @@ Packages/InterviewCore/       Platform-independent logic (unit tested)
 
 ### The office
 
-The office, its furniture and the five-person cast are built procedurally from RealityKit primitives, so the project has no 3D asset dependencies. Characters are jointed figures with procedural animation: breathing, talking, walking, typing, waving, pointing, nodding, and turning their heads to look at you. When you're led to the interview room, it is the office that moves around you, not you; you stay where you are. The office ambience (room tone, distant voices, keyboards) is a generated loop in `TheInterview/Resources`.
+The office, its furniture and the seven-person cast are built procedurally from RealityKit primitives, so the project has no 3D asset dependencies.
+
+- **Surfaces** use textures drawn in code at real-world scale: wood-plank and stone-tile floors, carpet tiles, ceiling tiles, wood grain and patterned rugs.
+- **Characters** are jointed figures with eyes that blink, lips that move as they talk, and hands that gesture. They breathe, shift their weight, walk, type and wave, and they turn their heads to look at you. While you speak they listen attentively, with small nods and a tilt of the head.
+- **Voices** are rendered with the system speech synthesizer and played from each character's mouth with spatial audio, so they come from where the person is standing.
+- **Movement:** when you're led to the interview room, it is the office that moves around you, not you; you stay where you are.
+- **Ambience** (room tone, distant voices, keyboards) is a generated loop in `TheInterview/Resources`.
 
 ### Questions and feedback
 
-- **With an OpenAI key**, questions are generated for the exact position you name, at your chosen level and focus. The interviewer's brief reactions are generated too. After the interview the transcript and measurements are sent for evaluation, and the model writes the scores and feedback. Requests use the Chat Completions API in JSON mode. The model is configurable in Settings (default `gpt-4.1-mini`).
+- **With an OpenAI key**, questions are generated for the exact position you name, at your chosen level and focus. After each answer the model writes the interviewer's brief reaction and decides whether a follow-up question is warranted. After the interview the transcript and measurements are sent for evaluation; the model writes the scores, the feedback, and an example stronger answer for each question. Requests use the Chat Completions API in JSON mode. The model is configurable in Settings (default `gpt-4.1-mini`).
 - **Measured numbers always come from the device**: words per minute, filler words, speaking time and eye contact. The AI's feedback is layered on top of these.
-- **If there's no key, or a request fails or times out**, the app falls back to its built-in question bank and an on-device evaluator. The evaluator scores relevance, clarity and structure, including STAR structure for behavioral questions.
+- **If there's no key, or a request fails or times out**, the app falls back to its built-in question bank and an on-device evaluator. The evaluator scores relevance, clarity and structure, including STAR structure for behavioral questions. On-device rules also decide follow-ups: answers that are very brief, have no concrete example, or tell a story without its outcome get probed.
+- **Follow-up replies** count toward the answer's score, as they would in a real interview. Follow-ups can be turned off in Settings.
 
 ### Eye contact
 
