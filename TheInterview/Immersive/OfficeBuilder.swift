@@ -18,17 +18,11 @@ import UIKit
 @MainActor
 struct OfficeBuilder {
     struct Cast {
-        let receptionist: CharacterRig
-        let interviewer: CharacterRig
-        let colleagues: [CharacterRig]
-        let chatPair: (CharacterRig, CharacterRig)
-    }
-
-    enum Layout {
-        static let receptionistStart = SIMD3<Float>(0, 0, -2.75)
-        static let interviewerChair = SIMD3<Float>(1.75, 0, -18.95)
-        /// Where the user ends up, facing the interviewer across the desk.
-        static let seat = SIMD3<Float>(1.75, 0, -17.2)
+        let receptionist: any OfficeCharacter
+        let interviewer: any OfficeCharacter
+        /// The two colleagues chatting in the aisle (built-in office only).
+        let chatPair: (CharacterRig, CharacterRig)?
+        let layout: OfficeLayout
     }
 
     private enum Palette {
@@ -53,31 +47,42 @@ struct OfficeBuilder {
     let companyName: String
     let interviewerName: String
 
-    func build(into world: Entity) -> Cast {
-        buildShell(world)
-        buildLobby(world)
-        let office = buildOpenPlanOffice(world)
-        buildInterviewRoom(world)
-        buildView(world)
+    /// Builds the office into `world`. A downloaded office model or characters in `assets` replace the
+    /// built-in ones; the built-in lighting is always added.
+    func build(into world: Entity, assets: OfficeAssets) -> Cast {
+        let layout: OfficeLayout
+        var chatPair: (CharacterRig, CharacterRig)?
+        if let office = assets.office {
+            world.addChild(office)
+            layout = OfficeLayout(markersIn: office)
+        } else {
+            buildShell(world)
+            buildLobby(world)
+            chatPair = buildOpenPlanOffice(world).chatPair
+            buildInterviewRoom(world)
+            buildView(world)
+            layout = .builtIn
+        }
         buildLighting(world)
 
-        let receptionist = CharacterRig(appearance: CharacterAppearance(
+        let receptionist: any OfficeCharacter = assets.receptionist ?? CharacterRig(appearance: CharacterAppearance(
             skin: 0xC68863, hair: 0x2B1B12, hairStyle: .long, top: Palette.teal, bottom: 0x2E2E36, eyes: 0x3B2A1E, scale: 0.96, build: 0.92
         ))
-        receptionist.place(at: Layout.receptionistStart, yaw: 0)
-        receptionist.setLooksAtUser(true)
+        // Facing the user, who starts at the origin.
+        receptionist.place(at: layout.receptionistStart, yaw: Entity.yaw(toward: -layout.receptionistStart))
+        receptionist.setLooksAtUser(true, range: 7)
         world.addChild(receptionist.root)
 
-        let interviewer = CharacterRig(appearance: CharacterAppearance(
+        let interviewer: any OfficeCharacter = assets.interviewer ?? CharacterRig(appearance: CharacterAppearance(
             skin: 0xE0B394, hair: 0x3B2F2A, hairStyle: .short, top: 0xF2F2F0, bottom: 0x2F3A4A, tie: 0x8C2F39, jacket: 0x2F3A4A,
             eyes: 0x56708C, build: 1.05
         ))
-        interviewer.place(at: Layout.interviewerChair, yaw: 0)
+        interviewer.place(at: layout.interviewerChair, yaw: Entity.yaw(toward: layout.seat - layout.interviewerChair))
         // Writing notes until the candidate arrives.
-        interviewer.applyPose(.typing)
+        interviewer.applyPose(.typing, duration: 0)
         world.addChild(interviewer.root)
 
-        return Cast(receptionist: receptionist, interviewer: interviewer, colleagues: office.colleagues, chatPair: office.chatPair)
+        return Cast(receptionist: receptionist, interviewer: interviewer, chatPair: chatPair, layout: layout)
     }
 
     // MARK: Shell

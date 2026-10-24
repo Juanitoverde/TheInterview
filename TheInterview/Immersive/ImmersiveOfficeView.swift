@@ -10,7 +10,9 @@ struct ImmersiveOfficeView: View {
 
     var body: some View {
         RealityView { content, attachments in
-            let stage = OfficeStage(configuration: model.settings.interviewConfiguration, comfortMode: model.settings.comfortMode)
+            // Downloaded models (if any) replace the built-in office and people.
+            let assets = await OfficeAssets.load()
+            let stage = OfficeStage(configuration: model.settings.interviewConfiguration, comfortMode: model.settings.comfortMode, assets: assets)
             content.add(stage.root)
             if let panel = attachments.entity(for: Self.panelID) {
                 stage.attachHUD(panel)
