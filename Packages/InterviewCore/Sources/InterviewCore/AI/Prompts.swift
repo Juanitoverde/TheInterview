@@ -58,6 +58,21 @@ enum Prompts {
         """
     }
 
+    static func candidateQuestionUser(question: String, position: String, companyName: String) -> String {
+        """
+        You are the hiring manager at \(companyName), interviewing a candidate for "\(position)". At the end of the \
+        interview you asked whether they had any questions, and they asked (speech-to-text, may contain errors):
+        "\(question.prefix(600))"
+
+        Answer in character, the way a real hiring manager would in conversation:
+        - 2-3 spoken sentences, at most 60 words, warm and specific.
+        - Invent plausible, unremarkable details about the team or company where needed; don't promise anything.
+        - For salary or benefits, say HR will cover the package at the next stage.
+
+        Return JSON: {"answer": "..."}
+        """
+    }
+
     // MARK: Evaluation
 
     static let evaluationSystem = """
@@ -79,6 +94,7 @@ enum Prompts {
             let speakingSeconds: Int
             let wordsPerMinute: Int?
             let fillerWords: Int
+            let longPauses: Int?
             let eyeContactPercent: Int?
         }
 
@@ -90,10 +106,13 @@ enum Prompts {
         let lookAwayCount: Int?
         let averageWordsPerMinute: Int?
         let totalFillerWords: Int
+        let interviewerInvitedQuestions: Bool
+        let candidateQuestions: [String]
         let questions: [Question]
     }
 
-    static func evaluationUser(record: InterviewRecord, baseline: InterviewReport) -> String {
+    static func evaluationUser(record: InterviewRecord, baseline: InterviewReport, maxAnswerCharacters: Int = 4000) -> String {
+        let followUpLimit = max(maxAnswerCharacters / 2, 200)
         let payload = EvaluationPayload(
             position: record.position,
             candidateLevel: record.configuration.difficulty.displayName,
@@ -103,6 +122,8 @@ enum Prompts {
             lookAwayCount: baseline.eyeContact.isAvailable ? baseline.eyeContact.lookAwayCount : nil,
             averageWordsPerMinute: baseline.delivery.averageWordsPerMinute,
             totalFillerWords: baseline.delivery.fillerCount,
+            interviewerInvitedQuestions: record.candidateQuestionsInvited,
+            candidateQuestions: record.candidateQuestions.map { String($0.prefix(300)) },
             questions: record.answers.map { answer in
                 let feedback = baseline.questions.first { $0.index == answer.index }
                 let metrics = answer.combinedMetrics
@@ -112,13 +133,14 @@ enum Prompts {
                     category: answer.question.category.rawValue,
                     question: answer.question.text,
                     whatAStrongAnswerShows: answer.question.intent,
-                    answer: answer.utterance.text.isEmpty ? "(no answer)" : String(answer.utterance.text.prefix(4000)),
+                    answer: answer.utterance.text.isEmpty ? "(no answer)" : String(answer.utterance.text.prefix(maxAnswerCharacters)),
                     followUpQuestion: answer.followUp?.question,
-                    followUpAnswer: answer.followUp.map { _ in followUpReply.isEmpty ? "(no answer)" : String(followUpReply.prefix(2000)) },
+                    followUpAnswer: answer.followUp.map { _ in followUpReply.isEmpty ? "(no answer)" : String(followUpReply.prefix(followUpLimit)) },
                     answeredBy: answer.utterance.method == .typed ? "typing" : "speaking",
                     speakingSeconds: Int(metrics.speakingSeconds.rounded()),
                     wordsPerMinute: metrics.wordsPerMinute.map { Int($0.rounded()) },
                     fillerWords: metrics.fillerCount,
+                    longPauses: Prosody.combined(answer.utterance.prosody, answer.followUp?.utterance.prosody)?.longPauseCount,
                     eyeContactPercent: feedback?.eyeContactPercent
                 )
             }
@@ -132,17 +154,23 @@ enum Prompts {
 
         \(json)
 
-        Scoring rules:
-        - Score each question 0-10 overall, plus relevance, clarity and structure 0-10, judging the answer together with any follow-up answer. An answer of "(no answer)" with no follow-up answer scores 0 on everything.
+        Scoring rubric for each question (0-10), judging the answer together with any follow-up answer:
+        - 0: no answer. 1-3: off-topic, very vague, or no real substance. 4-5: relevant but generic, little evidence.
+        - 6-7: solid and relevant with a concrete example. 8-9: specific, well structured, clear personal contribution and a measurable result.
+        - 10: exceptional; would stand out among strong candidates. Most good answers are 6-8; reserve 9-10.
+        - relevance: does it answer what was asked? clarity: easy to follow, concise, confident? structure: logical order; STAR for behavioral questions.
+        - For technical questions, judge whether the content would be credible to an experienced practitioner of this role.
+        - Penalise speaking negatively about past employers, claiming only team credit ("we") without the candidate's own part, and rambling.
         - exampleAnswer shows how a strong candidate might answer that question, in first person, 2-4 spoken sentences. Build on the candidate's own experience and details where possible; for unanswered questions, write a plausible example for this role.
         - Reward specific examples, measurable results and clear structure (STAR for behavioral questions). Penalise vague, off-topic or rambling answers.
-        - overallScore is 0-100 and reflects answer quality mainly, with eye contact and delivery as smaller factors.
+        - contentScore is 0-100 for the quality of the answers only. Don't factor in delivery or eye contact; those are measured separately.
+        - If the interviewer invited questions, comment in strengths or improvements on the candidate's questions (or the lack of them).
         - Feedback must quote or reference what the candidate actually said. Suggestions must be concrete and actionable.
         - If eyeContactTracked is false, return an empty string for eyeContactFeedback.
 
         Return JSON exactly in this shape:
         {
-          "overallScore": 0,
+          "contentScore": 0,
           "summary": "2-3 sentences addressed to the candidate",
           "strengths": ["2-4 short items"],
           "improvements": ["2-4 short, actionable items"],

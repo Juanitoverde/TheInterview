@@ -26,6 +26,10 @@ public enum ResponseInterpreter {
         ["the", "position", "is"], ["position", "is"], ["the", "role", "is"], ["role", "is"], ["it's", "for"], ["it", "is", "for"],
         ["the", "position", "of"], ["the", "role", "of"], ["the", "job", "of"], ["a", "position", "as"], ["the", "position", "as"],
         ["position", "as"], ["role", "as"], ["job", "as"], ["i'm", "a"], ["i", "am", "a"], ["i'm", "an"], ["i", "am", "an"],
+        ["i'm", "here", "about"], ["i", "am", "here", "about"], ["here", "about"], ["it's", "about"], ["about"], ["regarding"],
+        ["i'm", "interviewing", "to", "be"], ["i", "am", "interviewing", "to", "be"], ["i", "want", "to", "be"],
+        ["the", "job", "in"], ["the", "opening", "for"], ["the", "vacancy", "for"], ["the", "role", "for"],
+        ["it's"], ["it", "is"],
         ["for"], ["as"], ["the"], ["a"], ["an"], ["your"],
     ]
 
@@ -114,6 +118,34 @@ public enum ResponseInterpreter {
         guard !words.isEmpty, words.count <= 14 else { return false }
         let text = words.joined(separator: " ")
         return repeatPhrases.contains { text.contains($0) }
+    }
+
+    // MARK: Candidate questions
+
+    private static let declines = [
+        "no", "nope", "not really", "not at the moment", "not right now", "i don't think so", "i think you've covered",
+        "you've covered", "that's all", "nothing", "i'm good", "i'm fine", "all good", "no thanks", "no thank you",
+        "thank you", "thanks", "i'm all set", "all set", "none",
+    ]
+
+    private static let declinePhrases = [
+        "covered everything", "covers it", "covered it", "don't have any", "no questions", "not that i can think of",
+    ]
+
+    private static let questionStarters: Set<String> = [
+        "what", "how", "when", "where", "who", "why", "which", "could", "can", "is", "are", "do", "does", "would", "will", "should",
+    ]
+
+    /// Whether the candidate's reply to "Do you have any questions for me?" actually asks something.
+    public static func asksQuestion(_ reply: String) -> Bool {
+        let words = TextTools.words(in: reply)
+        guard !words.isEmpty else { return false }
+        let text = words.joined(separator: " ")
+        let hasQuestionMark = reply.contains("?")
+        let hasQuestionWord = words.contains { questionStarters.contains($0) } || text.contains("i'd like to know") || text.contains("i was wondering")
+        let declined = declines.contains { text == $0 || text.hasPrefix($0 + " ") } || declinePhrases.contains { text.contains($0) }
+        if declined && !hasQuestionMark && words.count < 12 { return false }
+        return hasQuestionMark || hasQuestionWord || words.count >= 6
     }
 
     // MARK: Finish cues

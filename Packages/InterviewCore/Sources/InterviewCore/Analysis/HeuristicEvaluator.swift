@@ -18,11 +18,12 @@ public struct HeuristicEvaluator: InterviewEvaluating {
 
         let asked = max(record.answers.count, 1)
         let contentAverage = Double(feedback.reduce(0) { $0 + $1.score }) / Double(asked)
-        var overall = contentAverage * 10
-        if eyeContact.isAvailable {
-            overall = overall * 0.85 + Double(eyeContact.score) * 0.15
-        }
-        let overallScore = clamp(Int(overall.rounded()), 0, 100)
+        let breakdown = ScoreBreakdown(
+            content: clamp(Int((contentAverage * 10).rounded()), 0, 100),
+            delivery: delivery.score,
+            eyeContact: eyeContact.isAvailable ? eyeContact.score : nil
+        )
+        let overallScore = breakdown.overall
 
         let strengths = overallStrengths(feedback: feedback, record: record, eyeContact: eyeContact)
         let improvements = overallImprovements(feedback: feedback, record: record, eyeContact: eyeContact)
@@ -48,7 +49,9 @@ public struct HeuristicEvaluator: InterviewEvaluating {
             questions: feedback,
             analysisSource: .onDevice,
             notes: notes,
-            endedEarly: record.endedEarly
+            endedEarly: record.endedEarly,
+            candidateQuestions: record.candidateQuestionsInvited ? record.candidateQuestions : nil,
+            breakdown: breakdown
         )
     }
 
@@ -82,15 +85,26 @@ public struct HeuristicEvaluator: InterviewEvaluating {
 
         let category = answer.question.category
         let storyDriven = category == .behavioral || category == .situational
-        let questionWords = TextTools.contentWords(in: answer.question.text).union(TextTools.contentWords(in: position))
+        // What the question is probing for counts as on-topic too.
+        let questionWords = TextTools.contentWords(in: answer.question.text)
+            .union(TextTools.contentWords(in: position))
+            .union(TextTools.contentWords(in: answer.question.intent ?? ""))
         let overlap = questionWords.intersection(TextTools.contentWords(in: text)).count
         let star = Self.starComponents(in: text)
         let specific = Self.isSpecific(text)
+
+        let ownership = Self.ownership(in: text)
+        let leansOnWe = category == .behavioral && ownership.we >= 3 && Double(ownership.we) > Double(ownership.i) * 1.5
+        let negative = Self.soundsNegative(text)
+        let unsure = Self.opensUnsure(text)
+        let repetitive = metrics.wordCount >= 40 && Self.repetitionRatio(TextTools.words(in: text)) > 0.12
 
         var relevance = 5.0 + Double(min(3, overlap))
         if metrics.wordCount < 12 { relevance -= 2 }
         if category == .behavioral { relevance += star >= 3 ? 2 : star >= 2 ? 1 : 0 }
         if specific { relevance += 1 }
+        if leansOnWe { relevance -= 1 }
+        if negative { relevance -= 1 }
 
         var clarity = 9.0
         if metrics.fillerRatio > 0.08 { clarity -= 3 } else if metrics.fillerRatio > 0.04 { clarity -= 2 } else if metrics.fillerRatio > 0.02 { clarity -= 1 }
@@ -99,6 +113,8 @@ public struct HeuristicEvaluator: InterviewEvaluating {
         }
         if metrics.averageSentenceLength > 40 { clarity -= 1 }
         if metrics.hedgeCount >= 3 { clarity -= 1 }
+        if unsure { clarity -= 1 }
+        if repetitive { clarity -= 1 }
 
         var structure: Double = switch metrics.wordCount {
         case ..<15: 2
@@ -123,6 +139,12 @@ public struct HeuristicEvaluator: InterviewEvaluating {
         if c >= 8 { positives.append("Your delivery was clear and easy to follow.") }
 
         var issues: [(problem: String, fix: String)] = []
+        if negative {
+            issues.append(("Some of your wording came across as negative.", "Keep the tone constructive, especially about past employers and colleagues: focus on what you learned."))
+        }
+        if unsure {
+            issues.append(("You opened by saying you weren't sure.", "If you need a moment, say \"Let me think about that,\" then give your best answer with confidence."))
+        }
         if metrics.wordCount < 35 {
             issues.append(("This answer was quite brief.", "Expand with a concrete example: what you did, how you did it, and what happened as a result."))
         }
@@ -132,9 +154,15 @@ public struct HeuristicEvaluator: InterviewEvaluating {
         if category == .behavioral && star < 2 {
             issues.append(("It lacked a concrete example from your experience.", "Use the STAR method: describe the Situation, your Task, the Actions you took and the Result."))
         }
+        if leansOnWe {
+            issues.append(("You said \"we\" much more than \"I\".", "Make your own contribution clear: say what you did, not just what the team did."))
+        }
         if metrics.fillerRatio > 0.04 {
             let top = Self.topFillers(metrics.fillerWords, limit: 2).map { "\"\($0)\"" }.joined(separator: " and ")
             issues.append(("Filler words (\(top)) crept in.", "Pause silently instead of using filler words. A short pause sounds more confident."))
+        }
+        if repetitive {
+            issues.append(("You repeated yourself in places.", "Make each point once, then move on to the next."))
         }
         if let wpm = metrics.wordsPerMinute, wpm > 175 {
             issues.append(("You spoke quickly (about \(Int(wpm)) words per minute).", "Slow down slightly and pause between key points so each one lands."))
@@ -264,14 +292,48 @@ public struct HeuristicEvaluator: InterviewEvaluating {
             sentences.append("Your answers averaged \(averageLength) words; tightening them would make them easier to follow.")
         }
 
+        // Pauses measured from word timings.
+        let prosody = voiced.reduce(Prosody?.none) { total, answer in
+            Prosody.combined(Prosody.combined(total, answer.utterance.prosody), answer.followUp?.utterance.prosody)
+        }
+        if let prosody {
+            if prosody.longPauseCount >= 3 {
+                sentences.append("You paused for two seconds or more \(prosody.longPauseCount) times (the longest about \(Int(prosody.longestPause.rounded())) seconds). Short pauses are fine; for longer ones, a bridging phrase like \"Let me think about that\" keeps the conversation flowing.")
+            } else if prosody.longPauseCount == 0 && prosody.speakingSeconds >= 60 {
+                sentences.append("You kept a smooth flow without long hesitations.")
+            }
+        }
+
+        let hedges = voiced.reduce(0) { $0 + $1.combinedMetrics.hedgeCount }
+        let voicedWords = voiced.reduce(0) { $0 + $1.combinedMetrics.wordCount }
         return DeliveryReport(
             totalSpeakingSeconds: voiced.reduce(0) { $0 + $1.combinedMetrics.speakingSeconds },
             totalWords: totalWords,
             averageWordsPerMinute: averageWPM,
             fillerCount: fillerCount,
             topFillers: Self.topFillers(fillers, limit: 3),
-            feedback: sentences.isEmpty ? "No spoken answers were captured." : sentences.joined(separator: " ")
+            feedback: sentences.isEmpty ? "No spoken answers were captured." : sentences.joined(separator: " "),
+            score: Self.deliveryScore(words: voicedWords, wordsPerMinute: averageWPM, fillers: fillerCount, hedges: hedges, prosody: prosody),
+            longPauseCount: prosody?.longPauseCount,
+            longestPause: prosody?.longestPause
         )
+    }
+
+    /// 0...100 for how the answers were delivered: pace, filler words, hedging and long pauses.
+    static func deliveryScore(words: Int, wordsPerMinute: Int?, fillers: Int, hedges: Int, prosody: Prosody?) -> Int? {
+        guard words > 0 else { return nil }
+        var score = 100.0
+        if let wpm = wordsPerMinute.map(Double.init) {
+            if wpm < 95 || wpm > 185 { score -= 20 } else if !SpeechAnalyzer.idealWordsPerMinute.contains(wpm) { score -= 10 }
+        }
+        let fillerRatio = Double(fillers) / Double(words)
+        if fillerRatio > 0.08 { score -= 30 } else if fillerRatio > 0.04 { score -= 20 } else if fillerRatio > 0.02 { score -= 10 }
+        if Double(hedges) / Double(words) * 100 > 3 { score -= 10 }
+        if let prosody, prosody.speakingSeconds > 0 {
+            let pausesPerMinute = Double(prosody.longPauseCount) / max(prosody.speakingSeconds / 60, 0.5)
+            if pausesPerMinute > 2 { score -= 15 } else if pausesPerMinute > 1 { score -= 8 }
+        }
+        return clamp(Int(score.rounded()), 0, 100)
     }
 
     // MARK: Overall
@@ -298,6 +360,9 @@ public struct HeuristicEvaluator: InterviewEvaluating {
         }
         if answered.count == feedback.count && feedback.count == record.plannedQuestionCount {
             strengths.append("You answered every question.")
+        }
+        if record.candidateQuestions.contains(where: { TextTools.words(in: $0).count >= 5 }) {
+            strengths.append("You asked the interviewer thoughtful questions at the end.")
         }
         if strengths.isEmpty {
             strengths.append("You completed a practice interview, which is the most important step.")
@@ -340,6 +405,9 @@ public struct HeuristicEvaluator: InterviewEvaluating {
                 improvements.append("Quantify your impact with numbers, results or concrete details.")
             }
         }
+        if record.candidateQuestionsInvited && record.candidateQuestions.isEmpty {
+            improvements.append("Prepare one or two questions to ask the interviewer at the end; it shows genuine interest in the role.")
+        }
         if improvements.isEmpty {
             improvements.append("Keep stretching yourself: try a harder difficulty or a different question focus next time.")
         }
@@ -368,6 +436,46 @@ public struct HeuristicEvaluator: InterviewEvaluating {
     static func starComponents(in text: String) -> Int {
         let lowered = " " + TextTools.normalizeApostrophes(text).lowercased() + " "
         return starMarkers.filter { markers in markers.contains { lowered.contains($0) } }.count
+    }
+
+    /// How often the candidate says "I" versus "we".
+    static func ownership(in text: String) -> (i: Int, we: Int) {
+        let words = TextTools.words(in: text)
+        let first: Set<String> = ["i", "i'm", "i've", "i'd", "i'll", "me", "my", "myself"]
+        let team: Set<String> = ["we", "we're", "we've", "we'd", "we'll", "us", "our", "ourselves"]
+        return (words.filter(first.contains).count, words.filter(team.contains).count)
+    }
+
+    static let negativeMarkers = [
+        "hated", "i hate", "terrible boss", "terrible manager", "awful boss", "awful manager", "stupid", "incompetent",
+        "idiot", "useless", "worst company", "worst job", "toxic", "lazy coworkers", "lazy colleagues", "my boss was bad",
+    ]
+
+    static func soundsNegative(_ text: String) -> Bool {
+        let lowered = TextTools.normalizeApostrophes(text).lowercased()
+        return negativeMarkers.contains { lowered.contains($0) }
+    }
+
+    /// True when the answer starts with "I don't know" or similar (after any opening filler).
+    static func opensUnsure(_ text: String) -> Bool {
+        var words = TextTools.words(in: text)
+        while let first = words.first, ["um", "uh", "er", "well", "so", "hmm", "honestly"].contains(first) {
+            words.removeFirst()
+        }
+        let opening = words.prefix(4).joined(separator: " ")
+        return ["i don't know", "i'm not sure", "i am not sure", "not sure", "no idea", "i have no idea"].contains { opening.hasPrefix($0) }
+    }
+
+    /// Fraction of three-word sequences that repeat earlier ones.
+    static func repetitionRatio(_ words: [String]) -> Double {
+        guard words.count >= 6 else { return 0 }
+        var seen: Set<String> = []
+        var repeats = 0
+        for index in 0..<(words.count - 2) {
+            let trigram = words[index] + " " + words[index + 1] + " " + words[index + 2]
+            if !seen.insert(trigram).inserted { repeats += 1 }
+        }
+        return Double(repeats) / Double(words.count - 2)
     }
 
     static func mentionsOutcome(_ text: String) -> Bool {

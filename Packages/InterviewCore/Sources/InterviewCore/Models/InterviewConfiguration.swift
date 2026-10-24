@@ -73,6 +73,8 @@ public struct InterviewConfiguration: Codable, Equatable, Sendable {
     public var usesAIReactions: Bool
     /// How many follow-up questions the interviewer may ask over the whole interview (0 turns them off).
     public var maxFollowUps: Int
+    /// Whether the interviewer ends by asking "Do you have any questions for me?"
+    public var invitesCandidateQuestions: Bool
 
     /// How long to wait for the candidate to start talking before giving up on a short reply.
     public var shortReplyStartTimeout: TimeInterval
@@ -93,6 +95,7 @@ public struct InterviewConfiguration: Codable, Equatable, Sendable {
         presetPosition: String? = nil,
         usesAIReactions: Bool = true,
         maxFollowUps: Int = 2,
+        invitesCandidateQuestions: Bool = true,
         shortReplyStartTimeout: TimeInterval = 9,
         shortReplySilenceTimeout: TimeInterval = 1.6,
         answerStartTimeout: TimeInterval = 25,
@@ -107,6 +110,7 @@ public struct InterviewConfiguration: Codable, Equatable, Sendable {
         self.presetPosition = presetPosition
         self.usesAIReactions = usesAIReactions
         self.maxFollowUps = max(maxFollowUps, 0)
+        self.invitesCandidateQuestions = invitesCandidateQuestions
         self.shortReplyStartTimeout = shortReplyStartTimeout
         self.shortReplySilenceTimeout = shortReplySilenceTimeout
         self.answerStartTimeout = answerStartTimeout

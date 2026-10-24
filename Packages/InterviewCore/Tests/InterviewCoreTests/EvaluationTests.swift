@@ -111,14 +111,14 @@ final class OpenAITests: XCTestCase {
     }
 
     func testExtractsJSONFromFencedContent() {
-        XCTAssertEqual(OpenAIClient.extractJSONObject(from: "```json\n{\"a\": 1}\n```"), "{\"a\": 1}")
-        XCTAssertEqual(OpenAIClient.extractJSONObject(from: "{\"a\": {\"b\": 2}}"), "{\"a\": {\"b\": 2}}")
+        XCTAssertEqual(JSONText.extractObject(from: "```json\n{\"a\": 1}\n```"), "{\"a\": 1}")
+        XCTAssertEqual(JSONText.extractObject(from: "{\"a\": {\"b\": 2}}"), "{\"a\": {\"b\": 2}}")
     }
 
     func testQuestionGeneratorParsesAndTrims() async throws {
         let content = #"{"questions":[{"text":"Tell me about yourself.","category":"opener","intent":"fit"},{"text":"  ","category":"technical"},{"text":"How do you diagnose a misfire?","category":"Technical Skills"},{"text":"Extra","category":"closing"}]}"#
         let transport = MockTransport([(200, MockTransport.chat(content))])
-        let generator = OpenAIQuestionGenerator(client: OpenAIClient(apiKey: "sk", transport: transport))
+        let generator = AIQuestionGenerator(client: OpenAIClient(apiKey: "sk", transport: transport))
         let questions = try await generator.generateQuestions(for: QuestionRequest(position: "Mechanic", count: 2, difficulty: .entry, focus: .technical))
         XCTAssertEqual(questions.map(\.text), ["Tell me about yourself.", "How do you diagnose a misfire?"])
         XCTAssertEqual(questions.map(\.category), [.opener, .technical])
@@ -136,7 +136,7 @@ final class OpenAITests: XCTestCase {
                        {"index": 1, "score": 7, "feedback": "Should be ignored: empty answer", "exampleAnswer": "I would start by checking the codes."}]}
         """
         let transport = MockTransport([(200, MockTransport.chat(ai))])
-        let evaluator = OpenAIEvaluator(client: OpenAIClient(apiKey: "sk", model: "gpt-x", transport: transport))
+        let evaluator = AIEvaluator(client: OpenAIClient(apiKey: "sk", model: "gpt-x", transport: transport))
         let record = Fixtures.record(answers: [Fixtures.answerRecord(Fixtures.strongAnswer, index: 0), Fixtures.answerRecord("", index: 1)])
 
         let report = try await evaluator.evaluate(record)
@@ -164,7 +164,7 @@ final class OpenAITests: XCTestCase {
 
     func testResilientEvaluatorFallsBack() async throws {
         let transport = MockTransport([(500, #"{"error":{"message":"server down"}}"#)])
-        let evaluator = ResilientEvaluator(primary: OpenAIEvaluator(client: OpenAIClient(apiKey: "sk", transport: transport)))
+        let evaluator = ResilientEvaluator(primary: AIEvaluator(client: OpenAIClient(apiKey: "sk", transport: transport)))
         let report = try await evaluator.evaluate(Fixtures.record(answers: [Fixtures.answerRecord(Fixtures.strongAnswer)]))
         XCTAssertEqual(report.analysisSource, .onDevice)
         XCTAssertTrue(report.notes.first?.contains("server down") ?? false, report.notes.description)
@@ -176,7 +176,7 @@ final class OpenAITests: XCTestCase {
     func testReactionIsTruncatedWhenTooLong() async throws {
         let long = Array(repeating: "word", count: 40).joined(separator: " ")
         let transport = MockTransport([(200, MockTransport.chat(#"{"reaction":"\#(long)"}"#))])
-        let reaction = try await OpenAIReactionGenerator(client: OpenAIClient(apiKey: "sk", transport: transport))
+        let reaction = try await AIReactionGenerator(client: OpenAIClient(apiKey: "sk", transport: transport))
             .reaction(to: Fixtures.questions[0], answer: "Hello", position: "Mechanic", allowFollowUp: true)
         XCTAssertEqual(reaction.acknowledgement.split(separator: " ").count, 30)
         XCTAssertNil(reaction.followUp)
@@ -184,12 +184,12 @@ final class OpenAITests: XCTestCase {
 
     func testReactionFollowUpRespectsPermission() async throws {
         let body = MockTransport.chat(#"{"reaction":"Thanks.","followUp":"What was the result?"}"#)
-        let allowed = try await OpenAIReactionGenerator(client: OpenAIClient(apiKey: "sk", transport: MockTransport([(200, body)])))
+        let allowed = try await AIReactionGenerator(client: OpenAIClient(apiKey: "sk", transport: MockTransport([(200, body)])))
             .reaction(to: Fixtures.questions[1], answer: "I fixed it.", position: "Mechanic", allowFollowUp: true)
         XCTAssertEqual(allowed, InterviewerReaction(acknowledgement: "Thanks.", followUp: "What was the result?"))
 
         let transport = MockTransport([(200, body)])
-        let denied = try await OpenAIReactionGenerator(client: OpenAIClient(apiKey: "sk", transport: transport))
+        let denied = try await AIReactionGenerator(client: OpenAIClient(apiKey: "sk", transport: transport))
             .reaction(to: Fixtures.questions[1], answer: "I fixed it.", position: "Mechanic", allowFollowUp: false)
         XCTAssertNil(denied.followUp, "a follow-up is dropped when not allowed")
         let prompt = try XCTUnwrap(transport.requests.first?.httpBody).flatMap { String(data: $0, encoding: .utf8) } ?? ""

@@ -1,10 +1,10 @@
 import Foundation
 
-/// Generates interview questions tailored to the position with OpenAI.
-public struct OpenAIQuestionGenerator: QuestionGenerating {
-    private let client: OpenAIClient
+/// Generates interview questions tailored to the position with a language model.
+public struct AIQuestionGenerator: QuestionGenerating {
+    private let client: any LanguageModelClient
 
-    public init(client: OpenAIClient) {
+    public init(client: any LanguageModelClient) {
         self.client = client
     }
 
@@ -36,11 +36,12 @@ public struct OpenAIQuestionGenerator: QuestionGenerating {
     }
 }
 
-/// Writes the interviewer's short acknowledgement after each answer, and decides on follow-up questions.
-public struct OpenAIReactionGenerator: ReactionGenerating {
-    private let client: OpenAIClient
+/// Writes the interviewer's short acknowledgement after each answer, decides on follow-up questions,
+/// and answers the candidate's own questions at the end.
+public struct AIReactionGenerator: ReactionGenerating {
+    private let client: any LanguageModelClient
 
-    public init(client: OpenAIClient) {
+    public init(client: any LanguageModelClient) {
         self.client = client
     }
 
@@ -63,6 +64,19 @@ public struct OpenAIReactionGenerator: ReactionGenerating {
         )
     }
 
+    struct CandidateAnswer: Decodable {
+        let answer: String
+    }
+
+    public func answer(candidateQuestion: String, position: String, companyName: String) async throws -> String {
+        let data = try await client.completeJSON(
+            system: Prompts.reactionSystem,
+            user: Prompts.candidateQuestionUser(question: candidateQuestion, position: position, companyName: companyName),
+            timeout: 10
+        )
+        return Self.limit(try JSONDecoder().decode(CandidateAnswer.self, from: data).answer, words: 60)
+    }
+
     /// Guards against an over-long reply being read out in full.
     private static func limit(_ text: String, words limit: Int) -> String {
         let words = text.split(separator: " ")
@@ -70,15 +84,15 @@ public struct OpenAIReactionGenerator: ReactionGenerating {
     }
 }
 
-/// Asks OpenAI to grade the interview, layered over the on-device measurements.
+/// Asks a language model to grade the interview, layered over the on-device measurements.
 ///
-/// Numbers that were measured (pace, filler words, eye contact) always come from the device;
+/// Numbers that were measured (pace, filler words, pauses, eye contact) always come from the device;
 /// the model contributes scores for answer quality and the written feedback.
-public struct OpenAIEvaluator: InterviewEvaluating {
-    private let client: OpenAIClient
+public struct AIEvaluator: InterviewEvaluating {
+    private let client: any LanguageModelClient
     private let baseline = HeuristicEvaluator()
 
-    public init(client: OpenAIClient) {
+    public init(client: any LanguageModelClient) {
         self.client = client
     }
 
@@ -110,6 +124,9 @@ public struct OpenAIEvaluator: InterviewEvaluating {
             }
         }
 
+        /// Answer quality alone, 0-100.
+        let contentScore: Double?
+        /// Older prompt versions returned an overall score instead.
         let overallScore: Double?
         let summary: String?
         let strengths: [String]?
@@ -119,11 +136,12 @@ public struct OpenAIEvaluator: InterviewEvaluating {
         let questions: [Question]?
 
         enum CodingKeys: String, CodingKey {
-            case overallScore, summary, strengths, improvements, eyeContactFeedback, deliveryFeedback, questions
+            case contentScore, overallScore, summary, strengths, improvements, eyeContactFeedback, deliveryFeedback, questions
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            contentScore = try container.decodeLenientDouble(forKey: .contentScore)
             overallScore = try container.decodeLenientDouble(forKey: .overallScore)
             summary = try container.decodeIfPresent(String.self, forKey: .summary)
             strengths = try container.decodeIfPresent([String].self, forKey: .strengths)
@@ -138,7 +156,7 @@ public struct OpenAIEvaluator: InterviewEvaluating {
         let report = baseline.makeReport(for: record)
         let data = try await client.completeJSON(
             system: Prompts.evaluationSystem,
-            user: Prompts.evaluationUser(record: record, baseline: report),
+            user: Prompts.evaluationUser(record: record, baseline: report, maxAnswerCharacters: client.maxAnswerCharacters),
             timeout: 60
         )
         let response: Response
@@ -147,15 +165,20 @@ public struct OpenAIEvaluator: InterviewEvaluating {
         } catch {
             throw OpenAIError.decoding(error.localizedDescription)
         }
-        return Self.merge(response, into: report, model: client.model)
+        return Self.merge(response, into: report, model: client.modelName, source: client.analysisSource)
     }
 
-    static func merge(_ response: Response, into baseline: InterviewReport, model: String) -> InterviewReport {
+    static func merge(_ response: Response, into baseline: InterviewReport, model: String, source: AnalysisSource) -> InterviewReport {
         var report = baseline
-        report.analysisSource = .openAI
+        report.analysisSource = source
         report.analysisModel = model
 
-        if let score = response.overallScore {
+        if let content = response.contentScore, var breakdown = report.breakdown {
+            // The model judges the answers; delivery and eye contact stay as measured.
+            breakdown.content = clamp(Int(content.rounded()), 0, 100)
+            report.breakdown = breakdown
+            report.overallScore = breakdown.overall
+        } else if let score = response.overallScore {
             report.overallScore = clamp(Int(score.rounded()), 0, 100)
         }
         if let summary = response.summary?.nilIfBlank { report.summary = summary }

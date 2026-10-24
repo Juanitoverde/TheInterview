@@ -38,14 +38,25 @@ public struct Utterance: Codable, Equatable, Sendable {
     public var speechStartedAt: Date?
     /// When the last words were recognised.
     public var speechEndedAt: Date?
+    /// Pauses and speaking time measured from word timings, when the recogniser provided them.
+    public var prosody: Prosody?
 
-    public init(text: String, method: InputMethod, startedAt: Date, endedAt: Date, speechStartedAt: Date? = nil, speechEndedAt: Date? = nil) {
+    public init(
+        text: String,
+        method: InputMethod,
+        startedAt: Date,
+        endedAt: Date,
+        speechStartedAt: Date? = nil,
+        speechEndedAt: Date? = nil,
+        prosody: Prosody? = nil
+    ) {
         self.text = text
         self.method = method
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.speechStartedAt = speechStartedAt
         self.speechEndedAt = speechEndedAt
+        self.prosody = prosody
     }
 
     public static func silence(startedAt: Date, endedAt: Date) -> Utterance {
@@ -56,8 +67,12 @@ public struct Utterance: Codable, Equatable, Sendable {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Seconds the candidate was actually talking, falling back to the listening window.
+    /// Seconds the candidate was actually talking: from word timings when available, then from when
+    /// words were first and last recognised, then the whole listening window.
     public var speakingDuration: TimeInterval {
+        if let measured = prosody?.speakingSeconds, measured > 0 {
+            return measured
+        }
         if let start = speechStartedAt, let end = speechEndedAt, end > start {
             return end.timeIntervalSince(start)
         }
@@ -74,7 +89,8 @@ public struct Utterance: Codable, Equatable, Sendable {
             startedAt: startedAt,
             endedAt: other.endedAt,
             speechStartedAt: speechStartedAt ?? other.speechStartedAt,
-            speechEndedAt: other.speechEndedAt ?? speechEndedAt
+            speechEndedAt: other.speechEndedAt ?? speechEndedAt,
+            prosody: Prosody.combined(prosody, other.prosody)
         )
     }
 

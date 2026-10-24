@@ -34,6 +34,8 @@ public final class InterviewEngine {
     private var answers: [AnswerRecord] = []
     private var plannedQuestionCount = 0
     private var followUpsAsked = 0
+    private var candidateQuestions: [String] = []
+    private var candidateQuestionsInvited = false
     private var questionTask: Task<[InterviewQuestion], Never>?
     private var questionsReady = false
     private var earlyEndRequested = false
@@ -101,6 +103,7 @@ public final class InterviewEngine {
             try await walkToInterviewRoom()
             try await meetInterviewer()
             try await askQuestions()
+            try await inviteCandidateQuestions()
             try await close()
         } catch {
             questionTask?.cancel()
@@ -321,13 +324,62 @@ public final class InterviewEngine {
         return Response(followUp: script.followUpQuestion(for: reason))
     }
 
+    /// "Do you have any questions for me?" — answers up to two of the candidate's questions.
+    private func inviteCandidateQuestions() async throws {
+        guard configuration.invitesCandidateQuestions, !earlyEndRequested, !answers.isEmpty else { return }
+        candidateQuestionsInvited = true
+        update {
+            $0.phase = .candidateQuestions
+            $0.currentQuestion = nil
+            $0.questionNumber = nil
+            $0.isFollowUp = false
+        }
+        try await say(.interviewer, script.inviteQuestions())
+        for round in 0..<2 {
+            let reply = try await listen(.candidateQuestion)
+            if earlyEndRequested { return }
+            let text = ResponseInterpreter.strippingFinishCue(from: reply.text).text
+            guard ResponseInterpreter.asksQuestion(text) else {
+                if round == 0 { try await say(.interviewer, script.noQuestionsResponse()) }
+                return
+            }
+            candidateQuestions.append(text)
+            let nod = cue(.interviewerNods)
+            let answer = await answerToCandidate(text)
+            try await say(.interviewer, answer)
+            await nod.value
+            if round == 0 {
+                try await say(.interviewer, script.anythingElse())
+            }
+        }
+    }
+
+    private func answerToCandidate(_ question: String) async -> String {
+        if configuration.usesAIReactions, let generator = reactionGenerator {
+            let position = state.position ?? Self.defaultPosition
+            let company = configuration.companyName
+            if let answer = try? await withTimeout(seconds: 8, operation: {
+                try await generator.answer(candidateQuestion: question, position: position, companyName: company)
+            }), let line = answer.nilIfBlank {
+                return line
+            }
+        }
+        return script.answer(toCandidateQuestion: question)
+    }
+
+    /// True when the candidate stopped before every question had been asked.
+    private var endedBeforeLastQuestion: Bool {
+        earlyEndRequested && answers.count < plannedQuestionCount
+    }
+
     private func close() async throws {
         update {
             $0.phase = .closing
             $0.currentQuestion = nil
             $0.isFollowUp = false
         }
-        try await say(.interviewer, earlyEndRequested ? script.endedEarlyClosing() : script.closing())
+        let line = endedBeforeLastQuestion ? script.endedEarlyClosing() : candidateQuestionsInvited ? script.closingAfterQuestions() : script.closing()
+        try await say(.interviewer, line)
         try await perform(.interviewerStands)
         try await perform(.exitOffice)
     }
@@ -352,7 +404,9 @@ public final class InterviewEngine {
             overallAttention: overallAttention,
             startedAt: startedAt,
             endedAt: now(),
-            endedEarly: earlyEndRequested
+            endedEarly: endedBeforeLastQuestion,
+            candidateQuestionsInvited: candidateQuestionsInvited,
+            candidateQuestions: candidateQuestions
         )
         let report: InterviewReport
         do {
@@ -416,6 +470,8 @@ public final class InterviewEngine {
         let request: ListenRequest = switch purpose {
         case .answer:
             ListenRequest(purpose: purpose, startTimeout: configuration.answerStartTimeout, silenceTimeout: configuration.answerSilenceTimeout, allowsFinishCue: true)
+        case .candidateQuestion:
+            ListenRequest(purpose: purpose, startTimeout: min(configuration.answerStartTimeout, 12), silenceTimeout: configuration.answerSilenceTimeout, allowsFinishCue: true)
         case .position, .readiness:
             ListenRequest(purpose: purpose, startTimeout: configuration.shortReplyStartTimeout, silenceTimeout: configuration.shortReplySilenceTimeout, allowsFinishCue: false)
         }

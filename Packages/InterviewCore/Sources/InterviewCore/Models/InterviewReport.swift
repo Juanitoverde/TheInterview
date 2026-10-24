@@ -85,6 +85,9 @@ public struct InterviewRecord: Sendable {
     public var startedAt: Date
     public var endedAt: Date
     public var endedEarly: Bool
+    /// Whether the interviewer asked "Do you have any questions for me?"
+    public var candidateQuestionsInvited: Bool
+    public var candidateQuestions: [String]
 
     public init(
         candidate: CandidateProfile,
@@ -95,7 +98,9 @@ public struct InterviewRecord: Sendable {
         overallAttention: AttentionSummary,
         startedAt: Date,
         endedAt: Date,
-        endedEarly: Bool
+        endedEarly: Bool,
+        candidateQuestionsInvited: Bool = false,
+        candidateQuestions: [String] = []
     ) {
         self.candidate = candidate
         self.position = position
@@ -106,12 +111,49 @@ public struct InterviewRecord: Sendable {
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.endedEarly = endedEarly
+        self.candidateQuestionsInvited = candidateQuestionsInvited
+        self.candidateQuestions = candidateQuestions
     }
 }
 
 public enum AnalysisSource: String, Codable, Sendable {
     case openAI
+    /// Apple's on-device foundation model.
+    case appleIntelligence
+    /// The built-in rule-based evaluator.
     case onDevice
+}
+
+/// How the overall score is made up. Each part is 0...100; parts that couldn't be measured are nil.
+public struct ScoreBreakdown: Codable, Equatable, Sendable {
+    public var content: Int
+    public var delivery: Int?
+    public var eyeContact: Int?
+
+    public static let contentWeight = 0.7
+    public static let deliveryWeight = 0.15
+    public static let eyeContactWeight = 0.15
+
+    public init(content: Int, delivery: Int?, eyeContact: Int?) {
+        self.content = content
+        self.delivery = delivery
+        self.eyeContact = eyeContact
+    }
+
+    /// Weighted overall score; missing parts' weight is shared among the rest.
+    public var overall: Int {
+        var total = Double(content) * Self.contentWeight
+        var weight = Self.contentWeight
+        if let delivery {
+            total += Double(delivery) * Self.deliveryWeight
+            weight += Self.deliveryWeight
+        }
+        if let eyeContact {
+            total += Double(eyeContact) * Self.eyeContactWeight
+            weight += Self.eyeContactWeight
+        }
+        return min(max(Int((total / weight).rounded()), 0), 100)
+    }
 }
 
 public struct EyeContactReport: Codable, Equatable, Sendable {
@@ -140,14 +182,32 @@ public struct DeliveryReport: Codable, Equatable, Sendable {
     public var fillerCount: Int
     public var topFillers: [String]
     public var feedback: String
+    /// 0...100, or nil when nothing was spoken.
+    public var score: Int?
+    /// Pauses of two seconds or more, when word timings were available.
+    public var longPauseCount: Int?
+    public var longestPause: Double?
 
-    public init(totalSpeakingSeconds: Double, totalWords: Int, averageWordsPerMinute: Int?, fillerCount: Int, topFillers: [String], feedback: String) {
+    public init(
+        totalSpeakingSeconds: Double,
+        totalWords: Int,
+        averageWordsPerMinute: Int?,
+        fillerCount: Int,
+        topFillers: [String],
+        feedback: String,
+        score: Int? = nil,
+        longPauseCount: Int? = nil,
+        longestPause: Double? = nil
+    ) {
         self.totalSpeakingSeconds = totalSpeakingSeconds
         self.totalWords = totalWords
         self.averageWordsPerMinute = averageWordsPerMinute
         self.fillerCount = fillerCount
         self.topFillers = topFillers
         self.feedback = feedback
+        self.score = score
+        self.longPauseCount = longPauseCount
+        self.longestPause = longestPause
     }
 }
 
@@ -235,6 +295,9 @@ public struct InterviewReport: Codable, Equatable, Identifiable, Sendable {
     public var analysisModel: String?
     public var notes: [String]
     public var endedEarly: Bool
+    /// Questions the candidate asked at the end (nil in reports from older versions).
+    public var candidateQuestions: [String]?
+    public var breakdown: ScoreBreakdown?
 
     public init(
         id: UUID = UUID(),
@@ -253,7 +316,9 @@ public struct InterviewReport: Codable, Equatable, Identifiable, Sendable {
         analysisSource: AnalysisSource,
         analysisModel: String? = nil,
         notes: [String] = [],
-        endedEarly: Bool = false
+        endedEarly: Bool = false,
+        candidateQuestions: [String]? = nil,
+        breakdown: ScoreBreakdown? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -272,6 +337,8 @@ public struct InterviewReport: Codable, Equatable, Identifiable, Sendable {
         self.analysisModel = analysisModel
         self.notes = notes
         self.endedEarly = endedEarly
+        self.candidateQuestions = candidateQuestions
+        self.breakdown = breakdown
     }
 
     public var rating: String {
@@ -288,6 +355,12 @@ public struct InterviewReport: Codable, Equatable, Identifiable, Sendable {
         var lines: [String] = []
         lines.append("TheInterview: \(position)")
         lines.append("Overall score: \(overallScore)/100 (\(rating))")
+        if let breakdown {
+            var parts = ["answers \(breakdown.content)"]
+            if let delivery = breakdown.delivery { parts.append("delivery \(delivery)") }
+            if let eye = breakdown.eyeContact { parts.append("eye contact \(eye)") }
+            lines.append("Breakdown: " + parts.joined(separator: ", "))
+        }
         lines.append("")
         lines.append(summary)
         if !strengths.isEmpty {
@@ -305,6 +378,11 @@ public struct InterviewReport: Codable, Equatable, Identifiable, Sendable {
             lines.append("Eye contact: \(eyeContact.engagedPercent)% of the time. \(eyeContact.feedback)")
         }
         lines.append("Delivery: \(delivery.feedback)")
+        if let asked = candidateQuestions, !asked.isEmpty {
+            lines.append("")
+            lines.append("Your questions for the interviewer:")
+            lines += asked.map { "• \($0)" }
+        }
         for question in questions {
             lines.append("")
             lines.append("Q\(question.index + 1) [\(question.category.displayName)] \(question.question)")

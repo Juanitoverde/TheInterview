@@ -10,6 +10,7 @@ public enum InterviewPhase: String, Equatable, Sendable {
     case asking
     case answering
     case reacting
+    case candidateQuestions
     case closing
     case analyzing
     case finished
@@ -26,6 +27,7 @@ public enum InterviewPhase: String, Equatable, Sendable {
         case .asking: "Question"
         case .answering: "Your answer"
         case .reacting: "Interviewer"
+        case .candidateQuestions: "Your questions"
         case .closing: "Wrapping up"
         case .analyzing: "Analyzing your interview"
         case .finished: "Finished"
@@ -35,7 +37,7 @@ public enum InterviewPhase: String, Equatable, Sendable {
 
     /// Phases in which the interview proper (questions) is under way.
     public var isInQuestions: Bool {
-        [.preparingQuestions, .asking, .answering, .reacting].contains(self)
+        [.preparingQuestions, .asking, .answering, .reacting, .candidateQuestions].contains(self)
     }
 }
 
@@ -63,6 +65,6 @@ public struct InterviewState: Equatable, Sendable {
     public init() {}
 
     public var canFinishAnswer: Bool {
-        isListening && listeningPurpose == .answer
+        isListening && (listeningPurpose == .answer || listeningPurpose == .candidateQuestion)
     }
 }

@@ -3,6 +3,28 @@ import Foundation
 import FoundationNetworking
 #endif
 
+/// A language model that answers a system + user prompt with a JSON object.
+///
+/// OpenAI implements this in the package; the app adds Apple's on-device foundation model.
+public protocol LanguageModelClient {
+    /// Shown in reports, for example "gpt-4.1-mini".
+    var modelName: String { get }
+    var analysisSource: AnalysisSource { get }
+    /// Longest excerpt of an answer to include in prompts. Small on-device models have little context.
+    var maxAnswerCharacters: Int { get }
+    func completeJSON(system: String, user: String, timeout: TimeInterval) async throws -> Data
+}
+
+public enum JSONText {
+    /// Strips Markdown code fences or surrounding prose from a reply that should be a JSON object.
+    public static func extractObject(from content: String) -> String {
+        guard let start = content.firstIndex(of: "{"), let end = content.lastIndex(of: "}"), start < end else {
+            return content
+        }
+        return String(content[start...end])
+    }
+}
+
 public protocol HTTPTransport {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 }
@@ -130,19 +152,17 @@ public struct OpenAIClient {
             throw OpenAIError.decoding(error.localizedDescription)
         }
         guard let content = decoded.choices.first?.message.content?.nilIfBlank else { throw OpenAIError.emptyContent }
-        return Data(Self.extractJSONObject(from: content).utf8)
-    }
-
-    /// Strips Markdown code fences or surrounding prose from a reply that should be a JSON object.
-    static func extractJSONObject(from content: String) -> String {
-        guard let start = content.firstIndex(of: "{"), let end = content.lastIndex(of: "}"), start < end else {
-            return content
-        }
-        return String(content[start...end])
+        return Data(JSONText.extractObject(from: content).utf8)
     }
 
     /// Makes a tiny request to check the key and model work.
     public func verify() async throws {
         _ = try await completeJSON(system: "Reply with JSON only.", user: "Return {\"ok\": true} as JSON.", timeout: 20)
     }
+}
+
+extension OpenAIClient: LanguageModelClient {
+    public var modelName: String { model }
+    public var analysisSource: AnalysisSource { .openAI }
+    public var maxAnswerCharacters: Int { 4000 }
 }

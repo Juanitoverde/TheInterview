@@ -107,8 +107,14 @@ struct FixedReaction: ReactionGenerating {
     var line: String
     var followUp: String?
 
+    var candidateAnswer = "Great question. The team is small and friendly."
+
     func reaction(to question: InterviewQuestion, answer: String, position: String, allowFollowUp: Bool) async throws -> InterviewerReaction {
         InterviewerReaction(acknowledgement: line, followUp: followUp)
+    }
+
+    func answer(candidateQuestion: String, position: String, companyName: String) async throws -> String {
+        candidateAnswer
     }
 }
 

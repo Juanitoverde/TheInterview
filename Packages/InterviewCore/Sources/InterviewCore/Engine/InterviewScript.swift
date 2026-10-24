@@ -136,8 +136,59 @@ public struct InterviewScript {
         pick(["Thank you, that helps.", "Great, thanks for adding that.", "Okay, thank you."])
     }
 
+    public func inviteQuestions() -> String {
+        "Before we wrap up, do you have any questions for me?"
+    }
+
+    public mutating func anythingElse() -> String {
+        pick(["Is there anything else you'd like to ask?", "Anything else I can tell you?"])
+    }
+
+    public func noQuestionsResponse() -> String {
+        "No problem at all."
+    }
+
+    /// An answer to the candidate's question when no AI is available, matched on its topic.
+    public func answer(toCandidateQuestion question: String) -> String {
+        let text = TextTools.normalizeApostrophes(question).lowercased()
+        func mentions(_ keywords: [String]) -> Bool { keywords.contains { text.contains($0) } }
+        let company = configuration.companyName
+        if mentions(["next step", "hear back", "timeline", "process", "decision", "when will"]) {
+            return "Good question. We're meeting a few candidates this week, and we aim to get back to everyone with next steps within about a week."
+        }
+        if mentions(["salary", "pay", "benefit", "compensation", "bonus", "holiday", "vacation"]) {
+            return "Our HR team will take you through the full package at the next stage, but we aim to be competitive for this role."
+        }
+        if mentions(["remote", "hybrid", "hours", "schedule", "shift", "flexib", "work from home"]) {
+            return "We keep a fairly standard schedule, with some flexibility depending on what the team needs that week. We can go through the details at the next stage."
+        }
+        if mentions(["training", "learn", "develop", "grow", "career", "progress", "promot", "mentor"]) {
+            return "We take development seriously here. There's a structured onboarding period, and everyone has regular check-ins about their goals and a training budget."
+        }
+        if mentions(["team", "colleague", "work with", "report to", "manager"]) {
+            return "You'd be joining a team of about eight people and reporting to me. They're a supportive group, and new starters are paired with an experienced colleague for the first few weeks."
+        }
+        if mentions(["typical day", "day to day", "day-to-day", "responsib", "look like", "involve"]) {
+            return "Day to day, it's a mix of hands-on work and collaborating with the wider team. No two weeks are quite the same, which most people here enjoy."
+        }
+        if mentions(["success", "expect", "first 90", "first ninety", "first few months", "first year", "goal", "measure"]) {
+            return "In the first few months, success means learning how we work, building relationships across the team, and starting to own some work independently."
+        }
+        if mentions(["culture", "environment", "like working", "enjoy", "values", "atmosphere"]) {
+            return "People at \(company) are friendly and direct. We care about doing quality work and about helping each other out."
+        }
+        if mentions(["challenge", "difficult", "hardest"]) {
+            return "Honestly, the pace. We're busy, so it suits someone who stays organised and communicates early when things change."
+        }
+        return "That's a good question. I'd say the best thing about this role is the variety and the people you'd be working with. We can go into more detail at the next stage."
+    }
+
     public func closing() -> String {
         "That's all the questions I have for today. Thank you for your time\(commaName). We'll be in touch soon."
+    }
+
+    public func closingAfterQuestions() -> String {
+        "Thank you for your time today\(commaName). It was good to meet you, and we'll be in touch soon."
     }
 
     public func endedEarlyClosing() -> String {

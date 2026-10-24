@@ -10,6 +10,8 @@ public enum ListenPurpose: String, Sendable {
     case position
     case readiness
     case answer
+    /// The candidate's own questions at the end of the interview.
+    case candidateQuestion
 }
 
 public struct ListenRequest: Equatable, Sendable {
@@ -84,6 +86,9 @@ public struct InterviewerReaction: Equatable, Sendable {
 public protocol ReactionGenerating {
     /// The interviewer's response to an answer. `followUp` must be nil when `allowFollowUp` is false.
     func reaction(to question: InterviewQuestion, answer: String, position: String, allowFollowUp: Bool) async throws -> InterviewerReaction
+
+    /// The interviewer's in-character answer to a question the candidate asks at the end.
+    func answer(candidateQuestion: String, position: String, companyName: String) async throws -> String
 }
 
 public protocol InterviewEvaluating {

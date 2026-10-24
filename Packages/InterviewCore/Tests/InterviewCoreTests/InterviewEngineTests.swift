@@ -15,7 +15,7 @@ final class InterviewEngineTests: XCTestCase {
 
     private func makeEngine(
         input: ScriptedInput,
-        configuration: InterviewConfiguration = InterviewConfiguration(questionCount: 3, maxFollowUps: 0),
+        configuration: InterviewConfiguration = InterviewConfiguration(questionCount: 3, maxFollowUps: 0, invitesCandidateQuestions: false),
         questions: QuestionGenerating = FixedQuestions(questions: Fixtures.questions),
         reaction: ReactionGenerating? = FixedReaction(line: "Thanks, that's a useful detail."),
         evaluator: InterviewEvaluating = HeuristicEvaluator()
@@ -94,7 +94,7 @@ final class InterviewEngineTests: XCTestCase {
             .say("Okay, I'm ready now."),
             .say("Answer one"), .say("Answer two"), .say("Answer three"),
         ])
-        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 3, presetPosition: "Welder", maxFollowUps: 0))
+        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 3, presetPosition: "Welder", maxFollowUps: 0, invitesCandidateQuestions: false))
         let maybeReport = await engine.run()
         let report = try XCTUnwrap(maybeReport)
 
@@ -159,7 +159,7 @@ final class InterviewEngineTests: XCTestCase {
 
     func testQuestionGenerationFailureUsesBuiltInBank() async throws {
         let input = ScriptedInput([.say("Chef"), .say("Yes"), .say("A"), .say("B"), .say("C"), .say("D")])
-        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 4, maxFollowUps: 0), questions: FailingQuestions(), reaction: nil)
+        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 4, maxFollowUps: 0, invitesCandidateQuestions: false), questions: FailingQuestions(), reaction: nil)
         let maybeReport = await engine.run()
         let report = try XCTUnwrap(maybeReport)
         XCTAssertEqual(report.questions.count, 4)
@@ -202,7 +202,7 @@ final class InterviewEngineTests: XCTestCase {
         ])
         let engine = makeEngine(
             input: input,
-            configuration: InterviewConfiguration(questionCount: 3, maxFollowUps: 1),
+            configuration: InterviewConfiguration(questionCount: 3, maxFollowUps: 1, invitesCandidateQuestions: false),
             reaction: FixedReaction(line: "Thanks.", followUp: "What's the hardest repair you've done?")
         )
         let maybeReport = await engine.run()
@@ -226,7 +226,7 @@ final class InterviewEngineTests: XCTestCase {
             .say(Fixtures.strongAnswer),
             .say("Running my own workshop one day, with a team of three or four mechanics, focusing on electric vehicle repairs."),
         ])
-        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 3, maxFollowUps: 2), reaction: nil)
+        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 3, maxFollowUps: 2, invitesCandidateQuestions: false), reaction: nil)
         let maybeReport = await engine.run()
         let report = try XCTUnwrap(maybeReport)
 
@@ -238,11 +238,53 @@ final class InterviewEngineTests: XCTestCase {
 
     func testFollowUpsCanBeTurnedOff() async throws {
         let input = ScriptedInput([.say("Chef"), .say("Yes"), .say("Food."), .say("Pasta."), .say("Soon.")])
-        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 3, maxFollowUps: 0),
+        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 3, maxFollowUps: 0, invitesCandidateQuestions: false),
                                 reaction: FixedReaction(line: "Okay.", followUp: "Why?"))
         let maybeReport = await engine.run()
         let report = try XCTUnwrap(maybeReport)
         XCTAssertTrue(report.questions.allSatisfy { $0.followUpQuestion == nil })
         XCTAssertFalse(voice.lines(by: .interviewer).contains { $0.contains("Why?") })
+    }
+
+    // MARK: Candidate questions
+
+    func testInterviewerAnswersCandidateQuestions() async throws {
+        let input = ScriptedInput([
+            .say("Mechanic"), .say("Yes"), .say("A"), .say("B"), .say("C"),
+            .say("What does a typical day look like for the team?"),
+            .say("No, I think you've covered everything, thank you."),
+        ])
+        let engine = makeEngine(
+            input: input,
+            configuration: InterviewConfiguration(questionCount: 3, maxFollowUps: 0, invitesCandidateQuestions: true),
+            reaction: FixedReaction(line: "Thanks.")
+        )
+        let maybeReport = await engine.run()
+        let report = try XCTUnwrap(maybeReport)
+
+        let interviewer = voice.lines(by: .interviewer)
+        XCTAssertTrue(interviewer.contains("Before we wrap up, do you have any questions for me?"))
+        XCTAssertTrue(interviewer.contains("Great question. The team is small and friendly."))
+        XCTAssertTrue(interviewer.contains { $0.hasPrefix("Is there anything else") || $0.hasPrefix("Anything else") })
+        XCTAssertTrue(interviewer.last?.hasPrefix("Thank you for your time today") ?? false)
+        XCTAssertEqual(report.candidateQuestions, ["What does a typical day look like for the team?"])
+        XCTAssertEqual(input.requests.filter { $0.purpose == .candidateQuestion }.count, 2)
+        XCTAssertTrue(report.strengths.contains("You asked the interviewer thoughtful questions at the end."))
+    }
+
+    func testOfflineAnswerAndNoQuestions() async throws {
+        // Substantive answers, so the four-item improvements list has room for the note about questions.
+        let declining = ScriptedInput([.say("Chef"), .say("Yes"), .say(Fixtures.strongAnswer), .say(Fixtures.strongAnswer), .say(Fixtures.strongAnswer), .say("No, I'm good, thanks.")])
+        let engine = makeEngine(input: declining, configuration: InterviewConfiguration(questionCount: 3, maxFollowUps: 0, invitesCandidateQuestions: true), reaction: nil)
+        let maybeReport = await engine.run()
+        let report = try XCTUnwrap(maybeReport)
+        XCTAssertEqual(report.candidateQuestions, [])
+        XCTAssertTrue(voice.lines(by: .interviewer).contains("No problem at all."))
+        XCTAssertTrue(report.improvements.contains { $0.hasPrefix("Prepare one or two questions") })
+
+        let script = InterviewScript(candidate: Fixtures.candidate, configuration: InterviewConfiguration(), seed: 1)
+        XCTAssertTrue(script.answer(toCandidateQuestion: "When will I hear back about next steps?").contains("next steps"))
+        XCTAssertTrue(script.answer(toCandidateQuestion: "What's the salary range?").contains("HR"))
+        XCTAssertTrue(script.answer(toCandidateQuestion: "Is there training for new starters?").contains("development"))
     }
 }
