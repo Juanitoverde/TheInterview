@@ -1,5 +1,21 @@
 import Foundation
 
+/// A follow-up question the interviewer asked about an answer, and the candidate's reply.
+public struct FollowUpExchange: Codable, Equatable, Sendable {
+    public var question: String
+    public var utterance: Utterance
+    public var metrics: SpeechMetrics
+    /// Attention while the follow-up was asked and answered.
+    public var attention: AttentionSummary
+
+    public init(question: String, utterance: Utterance, metrics: SpeechMetrics, attention: AttentionSummary) {
+        self.question = question
+        self.utterance = utterance
+        self.metrics = metrics
+        self.attention = attention
+    }
+}
+
 public struct AnswerRecord: Codable, Equatable, Sendable {
     public var index: Int
     public var question: InterviewQuestion
@@ -9,6 +25,7 @@ public struct AnswerRecord: Codable, Equatable, Sendable {
     public var attentionWhileListening: AttentionSummary
     /// Head-pose attention while the candidate answered.
     public var attentionWhileAnswering: AttentionSummary
+    public var followUp: FollowUpExchange?
 
     public init(
         index: Int,
@@ -16,7 +33,8 @@ public struct AnswerRecord: Codable, Equatable, Sendable {
         utterance: Utterance,
         metrics: SpeechMetrics,
         attentionWhileListening: AttentionSummary,
-        attentionWhileAnswering: AttentionSummary
+        attentionWhileAnswering: AttentionSummary,
+        followUp: FollowUpExchange? = nil
     ) {
         self.index = index
         self.question = question
@@ -24,11 +42,24 @@ public struct AnswerRecord: Codable, Equatable, Sendable {
         self.metrics = metrics
         self.attentionWhileListening = attentionWhileListening
         self.attentionWhileAnswering = attentionWhileAnswering
+        self.followUp = followUp
+    }
+
+    /// The answer together with any follow-up reply; this is what gets scored.
+    public var combinedText: String {
+        [utterance.text, followUp?.utterance.text ?? ""]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    public var combinedMetrics: SpeechMetrics {
+        SpeechMetrics.combined(metrics, followUp?.metrics)
     }
 
     /// Combined attention over the whole exchange, weighted by tracked time.
     public var combinedAttention: AttentionSummary {
-        let parts = [attentionWhileListening, attentionWhileAnswering].filter(\.isAvailable)
+        let parts = [attentionWhileListening, attentionWhileAnswering, followUp?.attention ?? .unavailable].filter(\.isAvailable)
         guard !parts.isEmpty else { return .unavailable }
         let tracked = parts.reduce(0) { $0 + $1.trackedSeconds }
         let samples = parts.reduce(0) { $0 + $1.sampleCount }
@@ -136,6 +167,10 @@ public struct QuestionFeedback: Codable, Equatable, Identifiable, Sendable {
     public var suggestion: String
     public var metrics: SpeechMetrics
     public var eyeContactPercent: Int?
+    public var followUpQuestion: String?
+    public var followUpAnswer: String?
+    /// How a stronger answer might sound (written by the AI evaluator).
+    public var exampleAnswer: String?
 
     public init(
         id: UUID = UUID(),
@@ -151,7 +186,10 @@ public struct QuestionFeedback: Codable, Equatable, Identifiable, Sendable {
         feedback: String,
         suggestion: String,
         metrics: SpeechMetrics,
-        eyeContactPercent: Int?
+        eyeContactPercent: Int?,
+        followUpQuestion: String? = nil,
+        followUpAnswer: String? = nil,
+        exampleAnswer: String? = nil
     ) {
         self.id = id
         self.index = index
@@ -167,6 +205,14 @@ public struct QuestionFeedback: Codable, Equatable, Identifiable, Sendable {
         self.suggestion = suggestion
         self.metrics = metrics
         self.eyeContactPercent = eyeContactPercent
+        self.followUpQuestion = followUpQuestion
+        self.followUpAnswer = followUpAnswer
+        self.exampleAnswer = exampleAnswer
+    }
+
+    /// The answer plus any follow-up reply.
+    public var fullAnswer: String {
+        [answer, followUpAnswer ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
     }
 }
 
@@ -263,8 +309,14 @@ public struct InterviewReport: Codable, Equatable, Identifiable, Sendable {
             lines.append("")
             lines.append("Q\(question.index + 1) [\(question.category.displayName)] \(question.question)")
             lines.append("Your answer: \(question.answer.isEmpty ? "(no answer)" : question.answer)")
+            if let followUp = question.followUpQuestion {
+                lines.append("Follow-up: \(followUp)")
+                let reply = question.followUpAnswer ?? ""
+                lines.append("Your reply: \(reply.isEmpty ? "(no answer)" : reply)")
+            }
             lines.append("Score: \(question.score)/10. \(question.feedback)")
             if !question.suggestion.isEmpty { lines.append("Tip: \(question.suggestion)") }
+            if let example = question.exampleAnswer { lines.append("A stronger answer: \(example)") }
         }
         return lines.joined(separator: "\n")
     }

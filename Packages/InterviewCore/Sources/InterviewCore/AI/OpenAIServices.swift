@@ -36,7 +36,7 @@ public struct OpenAIQuestionGenerator: QuestionGenerating {
     }
 }
 
-/// Writes the interviewer's short acknowledgement after each answer.
+/// Writes the interviewer's short acknowledgement after each answer, and decides on follow-up questions.
 public struct OpenAIReactionGenerator: ReactionGenerating {
     private let client: OpenAIClient
 
@@ -46,18 +46,27 @@ public struct OpenAIReactionGenerator: ReactionGenerating {
 
     struct Response: Decodable {
         let reaction: String
+        let followUp: String?
     }
 
-    public func reaction(to question: InterviewQuestion, answer: String, position: String) async throws -> String {
+    public func reaction(to question: InterviewQuestion, answer: String, position: String, allowFollowUp: Bool) async throws -> InterviewerReaction {
         let data = try await client.completeJSON(
             system: Prompts.reactionSystem,
-            user: Prompts.reactionUser(question: question, answer: answer, position: position),
+            user: Prompts.reactionUser(question: question, answer: answer, position: position, allowFollowUp: allowFollowUp),
             timeout: 8
         )
         let response = try JSONDecoder().decode(Response.self, from: data)
-        // Guard against an over-long reply being read out in full.
-        let words = response.reaction.split(separator: " ")
-        return words.count > 30 ? words.prefix(30).joined(separator: " ") + "." : response.reaction
+        let followUp = allowFollowUp ? response.followUp?.nilIfBlank : nil
+        return InterviewerReaction(
+            acknowledgement: Self.limit(response.reaction, words: 30),
+            followUp: followUp.map { Self.limit($0, words: 40) }
+        )
+    }
+
+    /// Guards against an over-long reply being read out in full.
+    private static func limit(_ text: String, words limit: Int) -> String {
+        let words = text.split(separator: " ")
+        return words.count > limit ? words.prefix(limit).joined(separator: " ") + "." : text
     }
 }
 
@@ -82,9 +91,10 @@ public struct OpenAIEvaluator: InterviewEvaluating {
             let structure: Double?
             let feedback: String?
             let suggestion: String?
+            let exampleAnswer: String?
 
             enum CodingKeys: String, CodingKey {
-                case index, score, relevance, clarity, structure, feedback, suggestion
+                case index, score, relevance, clarity, structure, feedback, suggestion, exampleAnswer
             }
 
             init(from decoder: Decoder) throws {
@@ -96,6 +106,7 @@ public struct OpenAIEvaluator: InterviewEvaluating {
                 structure = try container.decodeLenientDouble(forKey: .structure)
                 feedback = try container.decodeIfPresent(String.self, forKey: .feedback)
                 suggestion = try container.decodeIfPresent(String.self, forKey: .suggestion)
+                exampleAnswer = try container.decodeIfPresent(String.self, forKey: .exampleAnswer)
             }
         }
 
@@ -156,8 +167,12 @@ public struct OpenAIEvaluator: InterviewEvaluating {
         for item in response.questions ?? [] {
             guard let position = report.questions.firstIndex(where: { $0.index == item.index }) else { continue }
             var question = report.questions[position]
-            // An empty answer stays at zero whatever the model says.
-            guard !question.answer.isEmpty else { continue }
+            question.exampleAnswer = item.exampleAnswer?.nilIfBlank
+            // An unanswered question stays at zero whatever the model says.
+            guard !question.fullAnswer.isEmpty else {
+                report.questions[position] = question
+                continue
+            }
             func scaled(_ value: Double?, _ fallback: Int) -> Int { value.map { clamp(Int($0.rounded()), 0, 10) } ?? fallback }
             question.score = scaled(item.score, question.score)
             question.relevance = scaled(item.relevance, question.relevance)

@@ -40,6 +40,30 @@ public struct SpeechMetrics: Codable, Equatable, Sendable {
     public var averageSentenceLength: Double {
         sentenceCount == 0 ? 0 : Double(wordCount) / Double(sentenceCount)
     }
+
+    /// Adds a follow-up reply's metrics to an answer's. Pace is recomputed when both were spoken.
+    public static func combined(_ first: SpeechMetrics, _ second: SpeechMetrics?) -> SpeechMetrics {
+        guard let second, second.wordCount > 0 else { return first }
+        guard first.wordCount > 0 else { return second }
+        var fillers = first.fillerWords
+        for (word, count) in second.fillerWords { fillers[word, default: 0] += count }
+        let words = first.wordCount + second.wordCount
+        let seconds = first.speakingSeconds + second.speakingSeconds
+        let pace: Double? = if first.wordsPerMinute != nil, second.wordsPerMinute != nil, seconds > 0 {
+            Double(words) / (seconds / 60)
+        } else {
+            first.wordsPerMinute ?? second.wordsPerMinute
+        }
+        return SpeechMetrics(
+            wordCount: words,
+            sentenceCount: first.sentenceCount + second.sentenceCount,
+            speakingSeconds: seconds,
+            wordsPerMinute: pace,
+            fillerCount: first.fillerCount + second.fillerCount,
+            fillerWords: fillers,
+            hedgeCount: first.hedgeCount + second.hedgeCount
+        )
+    }
 }
 
 public enum SpeechAnalyzer {

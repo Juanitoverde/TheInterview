@@ -105,7 +105,11 @@ struct FailingQuestions: QuestionGenerating {
 
 struct FixedReaction: ReactionGenerating {
     var line: String
-    func reaction(to question: InterviewQuestion, answer: String, position: String) async throws -> String { line }
+    var followUp: String?
+
+    func reaction(to question: InterviewQuestion, answer: String, position: String, allowFollowUp: Bool) async throws -> InterviewerReaction {
+        InterviewerReaction(acknowledgement: line, followUp: followUp)
+    }
 }
 
 /// Captures requests and returns canned HTTP responses.

@@ -56,6 +56,8 @@ public struct InterviewState: Equatable, Sendable {
     public var questionNumber: Int?
     public var questionCount: Int = 0
     public var currentQuestion: String?
+    /// True while the interviewer is asking, or the candidate answering, a follow-up question.
+    public var isFollowUp = false
     public var conversation: [TranscriptEntry] = []
 
     public init() {}

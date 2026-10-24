@@ -121,6 +121,21 @@ public struct InterviewScript {
         return line
     }
 
+    public mutating func followUpQuestion(for reason: FollowUpReason) -> String {
+        switch reason {
+        case .tooBrief:
+            pick(["Could you tell me a bit more about that?", "Can you expand on that a little?"])
+        case .needsExample:
+            pick(["Can you give me a specific example from your experience?", "Could you walk me through a time you actually did that?"])
+        case .needsOutcome:
+            pick(["And what was the outcome?", "How did that turn out in the end?"])
+        }
+    }
+
+    public mutating func followUpThanks() -> String {
+        pick(["Thank you, that helps.", "Great, thanks for adding that.", "Okay, thank you."])
+    }
+
     public func closing() -> String {
         "That's all the questions I have for today. Thank you for your time\(commaName). We'll be in touch soon."
     }

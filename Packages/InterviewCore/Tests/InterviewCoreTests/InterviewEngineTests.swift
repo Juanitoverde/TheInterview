@@ -15,7 +15,7 @@ final class InterviewEngineTests: XCTestCase {
 
     private func makeEngine(
         input: ScriptedInput,
-        configuration: InterviewConfiguration = InterviewConfiguration(questionCount: 3),
+        configuration: InterviewConfiguration = InterviewConfiguration(questionCount: 3, maxFollowUps: 0),
         questions: QuestionGenerating = FixedQuestions(questions: Fixtures.questions),
         reaction: ReactionGenerating? = FixedReaction(line: "Thanks, that's a useful detail."),
         evaluator: InterviewEvaluating = HeuristicEvaluator()
@@ -94,7 +94,7 @@ final class InterviewEngineTests: XCTestCase {
             .say("Okay, I'm ready now."),
             .say("Answer one"), .say("Answer two"), .say("Answer three"),
         ])
-        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 3, presetPosition: "Welder"))
+        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 3, presetPosition: "Welder", maxFollowUps: 0))
         let maybeReport = await engine.run()
         let report = try XCTUnwrap(maybeReport)
 
@@ -159,7 +159,7 @@ final class InterviewEngineTests: XCTestCase {
 
     func testQuestionGenerationFailureUsesBuiltInBank() async throws {
         let input = ScriptedInput([.say("Chef"), .say("Yes"), .say("A"), .say("B"), .say("C"), .say("D")])
-        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 4), questions: FailingQuestions(), reaction: nil)
+        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 4, maxFollowUps: 0), questions: FailingQuestions(), reaction: nil)
         let maybeReport = await engine.run()
         let report = try XCTUnwrap(maybeReport)
         XCTAssertEqual(report.questions.count, 4)
@@ -188,5 +188,61 @@ final class InterviewEngineTests: XCTestCase {
         let report = try XCTUnwrap(maybeReport)
         XCTAssertEqual(report.analysisSource, .onDevice)
         XCTAssertFalse(report.notes.isEmpty)
+    }
+
+    // MARK: Follow-ups
+
+    func testAIFollowUpIsAskedRecordedAndCapped() async throws {
+        let input = ScriptedInput([
+            .say("Mechanic"), .say("Yes"),
+            .say("I like engines."),
+            .say("I rebuilt a gearbox for a delivery van and it ran for another 80,000 miles."),
+            .say("Second answer"),
+            .say("Third answer"),
+        ])
+        let engine = makeEngine(
+            input: input,
+            configuration: InterviewConfiguration(questionCount: 3, maxFollowUps: 1),
+            reaction: FixedReaction(line: "Thanks.", followUp: "What's the hardest repair you've done?")
+        )
+        let maybeReport = await engine.run()
+        let report = try XCTUnwrap(maybeReport)
+
+        let interviewer = voice.lines(by: .interviewer)
+        XCTAssertEqual(interviewer.filter { $0.hasSuffix("What's the hardest repair you've done?") }, ["Thanks. What's the hardest repair you've done?"],
+                       "only one follow-up is allowed")
+        XCTAssertEqual(input.requests.map(\.purpose), [.position, .readiness, .answer, .answer, .answer, .answer])
+        XCTAssertEqual(report.questions[0].followUpQuestion, "What's the hardest repair you've done?")
+        XCTAssertEqual(report.questions[0].followUpAnswer, "I rebuilt a gearbox for a delivery van and it ran for another 80,000 miles.")
+        XCTAssertNil(report.questions[1].followUpQuestion)
+        XCTAssertEqual(report.questions[0].metrics.wordCount, 3 + 15, "follow-up words count toward the answer")
+    }
+
+    func testOfflineFollowUpProbesBriefAnswers() async throws {
+        let input = ScriptedInput([
+            .say("Mechanic"), .say("Yes"),
+            .say("Cars."),
+            .say("I've worked on cars since I was sixteen and I trained at the city technical college for two years."),
+            .say(Fixtures.strongAnswer),
+            .say("Running my own workshop one day, with a team of three or four mechanics, focusing on electric vehicle repairs."),
+        ])
+        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 3, maxFollowUps: 2), reaction: nil)
+        let maybeReport = await engine.run()
+        let report = try XCTUnwrap(maybeReport)
+
+        XCTAssertNotNil(report.questions[0].followUpQuestion, "a one-word answer gets probed")
+        XCTAssertNil(report.questions[1].followUpQuestion, "a full STAR answer with a result needs no follow-up")
+        XCTAssertNil(report.questions[2].followUpQuestion)
+        XCTAssertEqual(input.requests.filter { $0.purpose == .answer }.count, 4)
+    }
+
+    func testFollowUpsCanBeTurnedOff() async throws {
+        let input = ScriptedInput([.say("Chef"), .say("Yes"), .say("Food."), .say("Pasta."), .say("Soon.")])
+        let engine = makeEngine(input: input, configuration: InterviewConfiguration(questionCount: 3, maxFollowUps: 0),
+                                reaction: FixedReaction(line: "Okay.", followUp: "Why?"))
+        let maybeReport = await engine.run()
+        let report = try XCTUnwrap(maybeReport)
+        XCTAssertTrue(report.questions.allSatisfy { $0.followUpQuestion == nil })
+        XCTAssertFalse(voice.lines(by: .interviewer).contains { $0.contains("Why?") })
     }
 }

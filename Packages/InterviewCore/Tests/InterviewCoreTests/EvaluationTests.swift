@@ -20,6 +20,22 @@ final class HeuristicEvaluatorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(HeuristicEvaluator.starComponents(in: Fixtures.strongAnswer), 3)
     }
 
+    func testFollowUpReplyCountsTowardTheScore() {
+        let evaluator = HeuristicEvaluator()
+        let brief = Fixtures.answerRecord("I fixed a truck once.", seconds: 4)
+        var withFollowUp = brief
+        let reply = Fixtures.answerRecord(Fixtures.strongAnswer, seconds: 45)
+        withFollowUp.followUp = FollowUpExchange(question: "Can you walk me through it?", utterance: reply.utterance, metrics: reply.metrics, attention: .unavailable)
+
+        let before = evaluator.feedback(for: brief, position: "Technical Mechanic")
+        let after = evaluator.feedback(for: withFollowUp, position: "Technical Mechanic")
+        XCTAssertGreaterThan(after.score, before.score)
+        XCTAssertEqual(after.answer, "I fixed a truck once.")
+        XCTAssertEqual(after.followUpQuestion, "Can you walk me through it?")
+        XCTAssertTrue(after.fullAnswer.hasSuffix("about 30 percent."))
+        XCTAssertTrue(HeuristicEvaluator().makeReport(for: Fixtures.record(answers: [withFollowUp])).plainText.contains("Follow-up: Can you walk me through it?"))
+    }
+
     func testReportAggregatesAndMentionsWorstCategoryForEyeContact() {
         var technical = Fixtures.answerRecord(Fixtures.strongAnswer, category: .technical, index: 0)
         technical.attentionWhileAnswering = AttentionSummary(sampleCount: 100, trackedSeconds: 30, engagedRatio: 0.3, lookAwayCount: 4, longestLookAwaySeconds: 6, averageDeviationDegrees: 25)
@@ -117,7 +133,7 @@ final class OpenAITests: XCTestCase {
         {"overallScore": "88", "summary": "Great job overall.", "strengths": ["Clear STAR story"], "improvements": ["Slow down"],
          "eyeContactFeedback": "Should be ignored: tracking unavailable", "deliveryFeedback": "Nice pace.",
          "questions": [{"index": 0, "score": "9/10", "relevance": 10, "clarity": 8, "structure": 9, "feedback": "You quantified impact.", "suggestion": "Mention safety."},
-                       {"index": 1, "score": 7, "feedback": "Should be ignored: empty answer"}]}
+                       {"index": 1, "score": 7, "feedback": "Should be ignored: empty answer", "exampleAnswer": "I would start by checking the codes."}]}
         """
         let transport = MockTransport([(200, MockTransport.chat(ai))])
         let evaluator = OpenAIEvaluator(client: OpenAIClient(apiKey: "sk", model: "gpt-x", transport: transport))
@@ -135,6 +151,8 @@ final class OpenAITests: XCTestCase {
         XCTAssertEqual(report.questions[0].score, 9)
         XCTAssertEqual(report.questions[0].relevance, 10)
         XCTAssertEqual(report.questions[0].suggestion, "Mention safety.")
+        XCTAssertNil(report.questions[0].exampleAnswer)
+        XCTAssertEqual(report.questions[1].exampleAnswer, "I would start by checking the codes.", "unanswered questions still get an example")
         XCTAssertEqual(report.questions[1].score, 0)
         XCTAssertFalse(report.questions[1].feedback.contains("Should be ignored"))
         // Measured numbers are untouched.
@@ -159,8 +177,23 @@ final class OpenAITests: XCTestCase {
         let long = Array(repeating: "word", count: 40).joined(separator: " ")
         let transport = MockTransport([(200, MockTransport.chat(#"{"reaction":"\#(long)"}"#))])
         let reaction = try await OpenAIReactionGenerator(client: OpenAIClient(apiKey: "sk", transport: transport))
-            .reaction(to: Fixtures.questions[0], answer: "Hello", position: "Mechanic")
-        XCTAssertEqual(reaction.split(separator: " ").count, 30)
+            .reaction(to: Fixtures.questions[0], answer: "Hello", position: "Mechanic", allowFollowUp: true)
+        XCTAssertEqual(reaction.acknowledgement.split(separator: " ").count, 30)
+        XCTAssertNil(reaction.followUp)
+    }
+
+    func testReactionFollowUpRespectsPermission() async throws {
+        let body = MockTransport.chat(#"{"reaction":"Thanks.","followUp":"What was the result?"}"#)
+        let allowed = try await OpenAIReactionGenerator(client: OpenAIClient(apiKey: "sk", transport: MockTransport([(200, body)])))
+            .reaction(to: Fixtures.questions[1], answer: "I fixed it.", position: "Mechanic", allowFollowUp: true)
+        XCTAssertEqual(allowed, InterviewerReaction(acknowledgement: "Thanks.", followUp: "What was the result?"))
+
+        let transport = MockTransport([(200, body)])
+        let denied = try await OpenAIReactionGenerator(client: OpenAIClient(apiKey: "sk", transport: transport))
+            .reaction(to: Fixtures.questions[1], answer: "I fixed it.", position: "Mechanic", allowFollowUp: false)
+        XCTAssertNil(denied.followUp, "a follow-up is dropped when not allowed")
+        let prompt = try XCTUnwrap(transport.requests.first?.httpBody).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        XCTAssertTrue(prompt.contains("Always null"))
     }
 }
 

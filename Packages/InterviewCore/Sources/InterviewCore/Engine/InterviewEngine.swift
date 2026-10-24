@@ -33,6 +33,7 @@ public final class InterviewEngine {
     private var startedAt = Date()
     private var answers: [AnswerRecord] = []
     private var plannedQuestionCount = 0
+    private var followUpsAsked = 0
     private var questionTask: Task<[InterviewQuestion], Never>?
     private var questionsReady = false
     private var earlyEndRequested = false
@@ -210,10 +211,12 @@ public final class InterviewEngine {
 
         for (index, question) in questions.enumerated() {
             if earlyEndRequested { break }
+            let isLast = index == questions.count - 1
             update {
                 $0.phase = .asking
                 $0.questionNumber = index + 1
                 $0.currentQuestion = question.text
+                $0.isFollowUp = false
             }
 
             attention.beginSegment()
@@ -221,60 +224,108 @@ public final class InterviewEngine {
             let listeningAttention = attention.endSegment()
 
             attention.beginSegment()
-            update { $0.phase = .answering }
-            var utterance = try await listen(.answer)
-            var repeats = 0
-            while repeats < 2, !earlyEndRequested, repeatRequested || ResponseInterpreter.isRepeatRequest(utterance.text) {
-                let replyWasOnlyARequest = ResponseInterpreter.isRepeatRequest(utterance.text)
-                repeatRequested = false
-                repeats += 1
-                update { $0.phase = .asking }
-                try await say(.interviewer, script.repeatPreface() + question.text)
-                update { $0.phase = .answering }
-                let next = try await listen(.answer)
-                utterance = replyWasOnlyARequest ? next : utterance.appending(next)
-            }
-            repeatRequested = false
+            let utterance = try await listenAllowingRepeats(of: question.text)
             let answeringAttention = attention.endSegment()
 
-            let cleaned = utterance.replacingText(ResponseInterpreter.strippingFinishCue(from: utterance.text).text)
-            answers.append(AnswerRecord(
+            var record = AnswerRecord(
                 index: index,
                 question: question,
-                utterance: cleaned,
-                metrics: SpeechAnalyzer.analyze(cleaned),
+                utterance: utterance,
+                metrics: SpeechAnalyzer.analyze(utterance),
                 attentionWhileListening: listeningAttention,
                 attentionWhileAnswering: answeringAttention
-            ))
+            )
+            guard !earlyEndRequested else {
+                answers.append(record)
+                break
+            }
 
-            if index < questions.count - 1, !earlyEndRequested {
-                update { $0.phase = .reacting }
-                try await react(to: question, answer: cleaned)
+            update { $0.phase = .reacting }
+            let canFollowUp = followUpsAsked < configuration.maxFollowUps && !utterance.isEmpty
+            let response = await interviewerResponse(to: question, answer: utterance, metrics: record.metrics, allowFollowUp: canFollowUp)
+
+            if let followUp = response.followUp {
+                followUpsAsked += 1
+                update {
+                    $0.phase = .asking
+                    $0.currentQuestion = followUp
+                    $0.isFollowUp = true
+                }
+                attention.beginSegment()
+                let nod = cue(.interviewerNods)
+                try await say(.interviewer, [response.acknowledgement, followUp].compactMap { $0 }.joined(separator: " "))
+                await nod.value
+                let reply = try await listenAllowingRepeats(of: followUp)
+                record.followUp = FollowUpExchange(question: followUp, utterance: reply, metrics: SpeechAnalyzer.analyze(reply), attention: attention.endSegment())
+                answers.append(record)
+                if !isLast, !earlyEndRequested {
+                    update {
+                        $0.phase = .reacting
+                        $0.isFollowUp = false
+                    }
+                    try await say(.interviewer, reply.isEmpty ? script.emptyAnswerReaction() : script.followUpThanks())
+                }
+            } else {
+                answers.append(record)
+                if !isLast {
+                    let nod = cue(.interviewerNods)
+                    try await say(.interviewer, response.acknowledgement ?? script.cannedReaction())
+                    await nod.value
+                }
             }
         }
     }
 
-    private func react(to question: InterviewQuestion, answer: Utterance) async throws {
-        let nod = cue(.interviewerNods)
-        var line: String?
+    /// Listens for an answer, re-asking the question if the candidate asks for a repeat.
+    private func listenAllowingRepeats(of questionText: String) async throws -> Utterance {
+        update { $0.phase = .answering }
+        var utterance = try await listen(.answer)
+        var repeats = 0
+        while repeats < 2, !earlyEndRequested, repeatRequested || ResponseInterpreter.isRepeatRequest(utterance.text) {
+            let replyWasOnlyARequest = ResponseInterpreter.isRepeatRequest(utterance.text)
+            repeatRequested = false
+            repeats += 1
+            update { $0.phase = .asking }
+            try await say(.interviewer, script.repeatPreface() + questionText)
+            update { $0.phase = .answering }
+            let next = try await listen(.answer)
+            utterance = replyWasOnlyARequest ? next : utterance.appending(next)
+        }
+        repeatRequested = false
+        return utterance.replacingText(ResponseInterpreter.strippingFinishCue(from: utterance.text).text)
+    }
+
+    private struct Response {
+        var acknowledgement: String?
+        var followUp: String?
+    }
+
+    /// The AI's acknowledgement and follow-up when available; otherwise on-device rules decide on a follow-up.
+    private func interviewerResponse(to question: InterviewQuestion, answer: Utterance, metrics: SpeechMetrics, allowFollowUp: Bool) async -> Response {
         if answer.isEmpty {
-            line = script.emptyAnswerReaction()
-        } else if configuration.usesAIReactions, let generator = reactionGenerator {
+            return Response(acknowledgement: script.emptyAnswerReaction())
+        }
+        if configuration.usesAIReactions, let generator = reactionGenerator {
             let position = state.position ?? Self.defaultPosition
             let text = answer.text
-            line = try? await withTimeout(seconds: 4) {
-                try await generator.reaction(to: question, answer: text, position: position)
+            let reaction = try? await withTimeout(seconds: 5) {
+                try await generator.reaction(to: question, answer: text, position: position, allowFollowUp: allowFollowUp)
             }
-            line = line?.nilIfBlank
+            if let reaction {
+                return Response(acknowledgement: reaction.acknowledgement.nilIfBlank, followUp: allowFollowUp ? reaction.followUp?.nilIfBlank : nil)
+            }
         }
-        try await say(.interviewer, line ?? script.cannedReaction())
-        await nod.value
+        guard allowFollowUp, let reason = FollowUpAdvisor.reason(for: question, answer: answer.text, metrics: metrics) else {
+            return Response()
+        }
+        return Response(followUp: script.followUpQuestion(for: reason))
     }
 
     private func close() async throws {
         update {
             $0.phase = .closing
             $0.currentQuestion = nil
+            $0.isFollowUp = false
         }
         try await say(.interviewer, earlyEndRequested ? script.endedEarlyClosing() : script.closing())
         try await perform(.interviewerStands)

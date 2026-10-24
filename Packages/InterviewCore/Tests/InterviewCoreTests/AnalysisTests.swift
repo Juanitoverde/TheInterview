@@ -28,8 +28,47 @@ final class SpeechAnalyzerTests: XCTestCase {
         XCTAssertEqual(metrics.wordCount, 6)
     }
 
+    func testNumbersWithSeparatorsAreOneWord() {
+        XCTAssertEqual(TextTools.words(in: "It ran 80,000 miles, then 2.5 more. Done."), ["it", "ran", "80,000", "miles", "then", "2.5", "more", "done"])
+    }
+
     func testEmptyText() {
         XCTAssertEqual(SpeechAnalyzer.analyze(text: "  ", speakingSeconds: 3, method: .voice), .empty)
+    }
+
+    func testCombinedMetrics() {
+        let first = SpeechAnalyzer.analyze(text: "Um, I checked the brakes first.", speakingSeconds: 6, method: .voice)
+        let second = SpeechAnalyzer.analyze(text: "Then, uh, I replaced the pads and tested them on the road.", speakingSeconds: 6, method: .voice)
+        let combined = SpeechMetrics.combined(first, second)
+        XCTAssertEqual(combined.wordCount, first.wordCount + second.wordCount)
+        XCTAssertEqual(combined.speakingSeconds, 12)
+        XCTAssertEqual(combined.wordsPerMinute ?? 0, Double(combined.wordCount) * 5, accuracy: 0.001)
+        XCTAssertEqual(combined.fillerWords, ["um": 1, "uh": 1])
+        XCTAssertEqual(SpeechMetrics.combined(first, nil), first)
+        XCTAssertEqual(SpeechMetrics.combined(.empty, second), second)
+    }
+}
+
+final class FollowUpAdvisorTests: XCTestCase {
+    private func reason(_ text: String, _ category: QuestionCategory) -> FollowUpReason? {
+        FollowUpAdvisor.reason(
+            for: InterviewQuestion(text: "Tell me about a time you solved a hard problem.", category: category),
+            answer: text,
+            metrics: SpeechAnalyzer.analyze(text: text, speakingSeconds: 20, method: .voice)
+        )
+    }
+
+    func testProbesWhatARealInterviewerWould() {
+        XCTAssertEqual(reason("I'm good at fixing things.", .behavioral), .tooBrief)
+        XCTAssertEqual(reason("I generally think staying calm and being organised is the most important thing, and I always try to communicate well with everyone around me.", .behavioral), .needsExample)
+        XCTAssertEqual(reason("At my last job a customer's van kept stalling, so I decided to test the fuel pump and I replaced it and I talked them through what had gone wrong.", .behavioral), .needsOutcome)
+        XCTAssertNil(reason(Fixtures.strongAnswer, .behavioral))
+        XCTAssertEqual(reason("I would mostly use the diagnostic scanner, a multimeter and a good set of hand tools for that sort of job.", .technical), .needsExample)
+        XCTAssertNil(reason("I'd use an OBD-II scanner, a multimeter, and a smoke machine for vacuum leaks; on my last job I used those daily on about 12 cars a day.", .technical))
+        XCTAssertNil(reason("I've always loved taking things apart and I think this workshop would be a great place to grow my career.", .motivation))
+        XCTAssertNil(reason("", .behavioral))
+        XCTAssertNil(reason("Running my own workshop one day, ideally one focused on electric and hybrid vehicles.", .closing), "short answers are fine for closing questions")
+        XCTAssertEqual(reason("Not sure yet.", .closing), .tooBrief)
     }
 }
 

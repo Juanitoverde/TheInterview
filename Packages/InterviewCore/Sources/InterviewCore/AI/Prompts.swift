@@ -34,18 +34,27 @@ enum Prompts {
     You are a friendly, professional hiring manager in a live interview. Respond only with JSON.
     """
 
-    static func reactionUser(question: InterviewQuestion, answer: String, position: String) -> String {
-        """
+    static func reactionUser(question: InterviewQuestion, answer: String, position: String, allowFollowUp: Bool) -> String {
+        let followUpRule = allowFollowUp
+            ? """
+            Only if the answer was vague, gave no concrete example, or left out how things turned out, write ONE short, \
+            natural follow-up question (at most 25 words) that probes for what's missing. Otherwise use null. \
+            Most solid answers need no follow-up.
+            """
+            : "Always null."
+        return """
         You are interviewing a candidate for "\(position)". You asked: "\(question.text)"
         The candidate answered (speech-to-text, may contain errors): "\(answer.prefix(1500))"
 
-        Write the brief, natural thing you say right after this answer, before moving on.
-        - At most 18 words, spoken style.
-        - Neutral to warm. Don't judge the answer's quality and don't give feedback.
+        "reaction": the brief, natural thing you say right after this answer.
+        - At most 15 words, spoken style, neutral to warm.
+        - Don't judge the answer's quality and don't give feedback.
         - You may reference one specific detail they mentioned.
-        - Don't ask another question.
+        - Don't ask a question in the reaction.
 
-        Return JSON: {"reaction": "..."}
+        "followUp": \(followUpRule)
+
+        Return JSON: {"reaction": "...", "followUp": "..." or null}
         """
     }
 
@@ -64,6 +73,8 @@ enum Prompts {
             let question: String
             let whatAStrongAnswerShows: String?
             let answer: String
+            let followUpQuestion: String?
+            let followUpAnswer: String?
             let answeredBy: String
             let speakingSeconds: Int
             let wordsPerMinute: Int?
@@ -94,16 +105,20 @@ enum Prompts {
             totalFillerWords: baseline.delivery.fillerCount,
             questions: record.answers.map { answer in
                 let feedback = baseline.questions.first { $0.index == answer.index }
+                let metrics = answer.combinedMetrics
+                let followUpReply = answer.followUp?.utterance.text ?? ""
                 return .init(
                     index: answer.index,
                     category: answer.question.category.rawValue,
                     question: answer.question.text,
                     whatAStrongAnswerShows: answer.question.intent,
                     answer: answer.utterance.text.isEmpty ? "(no answer)" : String(answer.utterance.text.prefix(4000)),
+                    followUpQuestion: answer.followUp?.question,
+                    followUpAnswer: answer.followUp.map { _ in followUpReply.isEmpty ? "(no answer)" : String(followUpReply.prefix(2000)) },
                     answeredBy: answer.utterance.method == .typed ? "typing" : "speaking",
-                    speakingSeconds: Int(answer.metrics.speakingSeconds.rounded()),
-                    wordsPerMinute: answer.metrics.wordsPerMinute.map { Int($0.rounded()) },
-                    fillerWords: answer.metrics.fillerCount,
+                    speakingSeconds: Int(metrics.speakingSeconds.rounded()),
+                    wordsPerMinute: metrics.wordsPerMinute.map { Int($0.rounded()) },
+                    fillerWords: metrics.fillerCount,
                     eyeContactPercent: feedback?.eyeContactPercent
                 )
             }
@@ -118,7 +133,8 @@ enum Prompts {
         \(json)
 
         Scoring rules:
-        - Score each question 0-10 overall, plus relevance, clarity and structure 0-10. An answer of "(no answer)" scores 0 on everything.
+        - Score each question 0-10 overall, plus relevance, clarity and structure 0-10, judging the answer together with any follow-up answer. An answer of "(no answer)" with no follow-up answer scores 0 on everything.
+        - exampleAnswer shows how a strong candidate might answer that question, in first person, 2-4 spoken sentences. Build on the candidate's own experience and details where possible; for unanswered questions, write a plausible example for this role.
         - Reward specific examples, measurable results and clear structure (STAR for behavioral questions). Penalise vague, off-topic or rambling answers.
         - overallScore is 0-100 and reflects answer quality mainly, with eye contact and delivery as smaller factors.
         - Feedback must quote or reference what the candidate actually said. Suggestions must be concrete and actionable.
@@ -132,7 +148,7 @@ enum Prompts {
           "improvements": ["2-4 short, actionable items"],
           "eyeContactFeedback": "1-2 sentences, or empty",
           "deliveryFeedback": "1-2 sentences on pace, filler words and conciseness",
-          "questions": [{"index": 0, "score": 0, "relevance": 0, "clarity": 0, "structure": 0, "feedback": "1-2 sentences", "suggestion": "1 sentence"}]
+          "questions": [{"index": 0, "score": 0, "relevance": 0, "clarity": 0, "structure": 0, "feedback": "1-2 sentences", "suggestion": "1 sentence", "exampleAnswer": "2-4 sentences"}]
         }
         """
     }

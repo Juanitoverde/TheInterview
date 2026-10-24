@@ -71,6 +71,8 @@ public struct InterviewConfiguration: Codable, Equatable, Sendable {
     public var presetPosition: String?
     /// Whether the interviewer's short acknowledgement after each answer is written by the AI.
     public var usesAIReactions: Bool
+    /// How many follow-up questions the interviewer may ask over the whole interview (0 turns them off).
+    public var maxFollowUps: Int
 
     /// How long to wait for the candidate to start talking before giving up on a short reply.
     public var shortReplyStartTimeout: TimeInterval
@@ -90,6 +92,7 @@ public struct InterviewConfiguration: Codable, Equatable, Sendable {
         interviewerName: String = "Daniel Park",
         presetPosition: String? = nil,
         usesAIReactions: Bool = true,
+        maxFollowUps: Int = 2,
         shortReplyStartTimeout: TimeInterval = 9,
         shortReplySilenceTimeout: TimeInterval = 1.6,
         answerStartTimeout: TimeInterval = 25,
@@ -103,6 +106,7 @@ public struct InterviewConfiguration: Codable, Equatable, Sendable {
         self.interviewerName = interviewerName
         self.presetPosition = presetPosition
         self.usesAIReactions = usesAIReactions
+        self.maxFollowUps = max(maxFollowUps, 0)
         self.shortReplyStartTimeout = shortReplyStartTimeout
         self.shortReplySilenceTimeout = shortReplySilenceTimeout
         self.answerStartTimeout = answerStartTimeout

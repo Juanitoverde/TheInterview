@@ -26,7 +26,7 @@ public struct HeuristicEvaluator: InterviewEvaluating {
 
         let strengths = overallStrengths(feedback: feedback, record: record, eyeContact: eyeContact)
         let improvements = overallImprovements(feedback: feedback, record: record, eyeContact: eyeContact)
-        let answered = feedback.filter { !$0.answer.isEmpty }.count
+        let answered = feedback.filter { !$0.fullAnswer.isEmpty }.count
 
         var summary = "You answered \(answered) of \(record.answers.count) question\(record.answers.count == 1 ? "" : "s") "
         summary += "for the \(record.position) interview and scored \(overallScore)/100."
@@ -55,9 +55,12 @@ public struct HeuristicEvaluator: InterviewEvaluating {
     // MARK: Per question
 
     func feedback(for answer: AnswerRecord, position: String) -> QuestionFeedback {
-        let text = answer.utterance.text.trimmed
-        let metrics = answer.metrics
+        // A follow-up reply counts toward the answer, as it would in a real interview.
+        let text = answer.combinedText
+        let metrics = answer.combinedMetrics
         let attention = answer.combinedAttention
+        let followUpQuestion = answer.followUp?.question
+        let followUpAnswer = answer.followUp.map { $0.utterance.text.trimmed }
         let eyePercent = attention.isAvailable ? Int((attention.engagedRatio * 100).rounded()) : nil
 
         guard !text.isEmpty else {
@@ -71,7 +74,9 @@ public struct HeuristicEvaluator: InterviewEvaluating {
                 feedback: "No answer was captured for this question.",
                 suggestion: "Even when you're unsure, talk through how you would approach it. Interviewers value seeing how you think.",
                 metrics: metrics,
-                eyeContactPercent: eyePercent
+                eyeContactPercent: eyePercent,
+                followUpQuestion: followUpQuestion,
+                followUpAnswer: followUpAnswer
             )
         }
 
@@ -155,7 +160,7 @@ public struct HeuristicEvaluator: InterviewEvaluating {
             index: answer.index,
             question: answer.question.text,
             category: category,
-            answer: text,
+            answer: answer.utterance.text.trimmed,
             inputMethod: answer.utterance.method,
             score: score,
             relevance: r,
@@ -164,7 +169,9 @@ public struct HeuristicEvaluator: InterviewEvaluating {
             feedback: feedbackText,
             suggestion: suggestion,
             metrics: metrics,
-            eyeContactPercent: eyePercent
+            eyeContactPercent: eyePercent,
+            followUpQuestion: followUpQuestion,
+            followUpAnswer: followUpAnswer
         )
     }
 
@@ -219,18 +226,18 @@ public struct HeuristicEvaluator: InterviewEvaluating {
     // MARK: Delivery
 
     func deliveryReport(for record: InterviewRecord) -> DeliveryReport {
-        let voiced = record.answers.filter { $0.utterance.method == .voice && $0.metrics.wordCount > 0 }
-        let paced = voiced.filter { $0.metrics.wordsPerMinute != nil }
-        let pacedWords = paced.reduce(0) { $0 + $1.metrics.wordCount }
-        let pacedSeconds = paced.reduce(0) { $0 + $1.metrics.speakingSeconds }
+        let voiced = record.answers.filter { $0.utterance.method == .voice && $0.combinedMetrics.wordCount > 0 }
+        let paced = voiced.filter { $0.combinedMetrics.wordsPerMinute != nil }
+        let pacedWords = paced.reduce(0) { $0 + $1.combinedMetrics.wordCount }
+        let pacedSeconds = paced.reduce(0) { $0 + $1.combinedMetrics.speakingSeconds }
         let averageWPM = pacedSeconds > 0 ? Int((Double(pacedWords) / (pacedSeconds / 60)).rounded()) : nil
 
         var fillers: [String: Int] = [:]
         for answer in record.answers {
-            for (word, count) in answer.metrics.fillerWords { fillers[word, default: 0] += count }
+            for (word, count) in answer.combinedMetrics.fillerWords { fillers[word, default: 0] += count }
         }
         let fillerCount = fillers.values.reduce(0, +)
-        let totalWords = record.answers.reduce(0) { $0 + $1.metrics.wordCount }
+        let totalWords = record.answers.reduce(0) { $0 + $1.combinedMetrics.wordCount }
         let ratio = totalWords > 0 ? Double(fillerCount) / Double(totalWords) : 0
 
         var sentences: [String] = []
@@ -249,7 +256,7 @@ public struct HeuristicEvaluator: InterviewEvaluating {
         } else {
             sentences.append("Filler words were rare (\(fillerCount) in total).")
         }
-        let answeredCount = max(record.answers.filter { $0.metrics.wordCount > 0 }.count, 1)
+        let answeredCount = max(record.answers.filter { $0.combinedMetrics.wordCount > 0 }.count, 1)
         let averageLength = totalWords / answeredCount
         if averageLength > 0 && averageLength < 40 {
             sentences.append("Your answers averaged \(averageLength) words, which is brief; fuller answers give the interviewer more to go on.")
@@ -258,7 +265,7 @@ public struct HeuristicEvaluator: InterviewEvaluating {
         }
 
         return DeliveryReport(
-            totalSpeakingSeconds: voiced.reduce(0) { $0 + $1.metrics.speakingSeconds },
+            totalSpeakingSeconds: voiced.reduce(0) { $0 + $1.combinedMetrics.speakingSeconds },
             totalWords: totalWords,
             averageWordsPerMinute: averageWPM,
             fillerCount: fillerCount,
@@ -270,13 +277,13 @@ public struct HeuristicEvaluator: InterviewEvaluating {
     // MARK: Overall
 
     func overallStrengths(feedback: [QuestionFeedback], record: InterviewRecord, eyeContact: EyeContactReport) -> [String] {
-        let answered = feedback.filter { !$0.answer.isEmpty }
+        let answered = feedback.filter { !$0.fullAnswer.isEmpty }
         guard !answered.isEmpty else { return [] }
         var strengths: [String] = []
         if eyeContact.isAvailable && eyeContact.engagedPercent >= 75 {
             strengths.append("Confident, steady eye contact with the interviewer.")
         }
-        let specificCount = answered.filter { Self.isSpecific($0.answer) }.count
+        let specificCount = answered.filter { Self.isSpecific($0.fullAnswer) }.count
         if specificCount * 2 >= answered.count {
             strengths.append("Concrete, specific examples that make your answers credible.")
         }
@@ -300,7 +307,7 @@ public struct HeuristicEvaluator: InterviewEvaluating {
 
     func overallImprovements(feedback: [QuestionFeedback], record: InterviewRecord, eyeContact: EyeContactReport) -> [String] {
         var improvements: [String] = []
-        let answered = feedback.filter { !$0.answer.isEmpty }
+        let answered = feedback.filter { !$0.fullAnswer.isEmpty }
         if eyeContact.isAvailable && eyeContact.engagedPercent < 60 {
             improvements.append("Maintain eye contact with the interviewer, especially while answering.")
         }
@@ -320,7 +327,7 @@ public struct HeuristicEvaluator: InterviewEvaluating {
                 improvements.append("Cut down on filler words; pause instead.")
             }
             let behavioral = answered.filter { $0.category == .behavioral }
-            if !behavioral.isEmpty && behavioral.filter({ Self.starComponents(in: $0.answer) >= 2 }).count * 2 < behavioral.count {
+            if !behavioral.isEmpty && behavioral.filter({ Self.starComponents(in: $0.fullAnswer) >= 2 }).count * 2 < behavioral.count {
                 improvements.append("Use the STAR method (Situation, Task, Action, Result) for behavioral questions.")
             }
             let speeds = answered.compactMap(\.metrics.wordsPerMinute)
@@ -329,7 +336,7 @@ public struct HeuristicEvaluator: InterviewEvaluating {
                 if average > 175 { improvements.append("Slow your pace a little so key points land.") }
                 if average < 100 { improvements.append("Keep a steadier pace; plan your first sentence before you start.") }
             }
-            if !answered.contains(where: { Self.isSpecific($0.answer) }) {
+            if !answered.contains(where: { Self.isSpecific($0.fullAnswer) }) {
                 improvements.append("Quantify your impact with numbers, results or concrete details.")
             }
         }
@@ -361,6 +368,11 @@ public struct HeuristicEvaluator: InterviewEvaluating {
     static func starComponents(in text: String) -> Int {
         let lowered = " " + TextTools.normalizeApostrophes(text).lowercased() + " "
         return starMarkers.filter { markers in markers.contains { lowered.contains($0) } }.count
+    }
+
+    static func mentionsOutcome(_ text: String) -> Bool {
+        let lowered = " " + TextTools.normalizeApostrophes(text).lowercased() + " "
+        return starMarkers[3].contains { lowered.contains($0) }
     }
 
     static func isSpecific(_ text: String) -> Bool {

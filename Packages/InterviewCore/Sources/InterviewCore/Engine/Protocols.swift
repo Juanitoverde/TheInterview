@@ -70,9 +70,20 @@ public protocol QuestionGenerating {
     func generateQuestions(for request: QuestionRequest) async throws -> [InterviewQuestion]
 }
 
+/// What the interviewer says after an answer: a brief acknowledgement, and possibly a probing follow-up.
+public struct InterviewerReaction: Equatable, Sendable {
+    public var acknowledgement: String
+    public var followUp: String?
+
+    public init(acknowledgement: String, followUp: String? = nil) {
+        self.acknowledgement = acknowledgement
+        self.followUp = followUp
+    }
+}
+
 public protocol ReactionGenerating {
-    /// A brief, natural acknowledgement the interviewer says after an answer.
-    func reaction(to question: InterviewQuestion, answer: String, position: String) async throws -> String
+    /// The interviewer's response to an answer. `followUp` must be nil when `allowFollowUp` is false.
+    func reaction(to question: InterviewQuestion, answer: String, position: String, allowFollowUp: Bool) async throws -> InterviewerReaction
 }
 
 public protocol InterviewEvaluating {

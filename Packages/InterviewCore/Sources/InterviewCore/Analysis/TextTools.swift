@@ -6,12 +6,17 @@ enum TextTools {
         text.replacingOccurrences(of: "\u{2019}", with: "'").replacingOccurrences(of: "\u{2018}", with: "'")
     }
 
-    /// Lowercased word tokens (letters, digits and inner apostrophes), with punctuation removed.
+    /// Lowercased word tokens (letters, digits, inner apostrophes, and separators inside numbers such as
+    /// "80,000" or "2.5"), with other punctuation removed.
     static func words(in text: String) -> [String] {
         var words: [String] = []
         var current = ""
-        for character in normalizeApostrophes(text).lowercased() {
-            if character.isLetter || character.isNumber || (character == "'" && !current.isEmpty) {
+        let characters = Array(normalizeApostrophes(text).lowercased())
+        for (index, character) in characters.enumerated() {
+            let isNumberSeparator = (character == "," || character == ".")
+                && current.last?.isNumber == true
+                && index + 1 < characters.count && characters[index + 1].isNumber
+            if character.isLetter || character.isNumber || isNumberSeparator || (character == "'" && !current.isEmpty) {
                 current.append(character)
             } else if !current.isEmpty {
                 words.append(current.trimmingCharacters(in: CharacterSet(charactersIn: "'")))
