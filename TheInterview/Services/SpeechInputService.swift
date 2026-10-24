@@ -41,6 +41,12 @@ final class SpeechInputService: VoiceInput {
         var lastSpeechAt: Date?
         var finishCueHeardAt: Date?
         var restarts = 0
+        /// Word timings from recognition tasks that have finished, one group per task.
+        var timingGroups: [[WordTiming]] = []
+        /// Word timings from the running task's latest result.
+        var currentTimings: [WordTiming] = []
+        /// Waiting for the recogniser's final result before completing.
+        var isFinishing = false
 
         init(request: ListenRequest, continuation: CheckedContinuation<Utterance, Error>, onPartial: @escaping @MainActor (String) -> Void) {
             self.request = request
@@ -109,7 +115,7 @@ final class SpeechInputService: VoiceInput {
     }
 
     func finishListening() {
-        if let session { complete(session) }
+        if let session { finish(session) }
     }
 
     /// Ends the current listen with typed text instead of speech.
@@ -134,6 +140,26 @@ final class SpeechInputService: VoiceInput {
 
     // MARK: Session lifecycle
 
+    /// Stops the microphone and briefly waits for the recogniser's final result, which carries word timings.
+    private func finish(_ session: ListeningSession) {
+        guard self.session === session, !session.isFinishing else { return }
+        guard recognitionTask != nil else {
+            complete(session)
+            return
+        }
+        session.isFinishing = true
+        onLevel?(0)
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        recognitionRequest?.endAudio()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(900))
+            self?.complete(session)
+        }
+    }
+
     private func complete(_ session: ListeningSession) {
         guard self.session === session else { return }
         self.session = nil
@@ -153,7 +179,8 @@ final class SpeechInputService: VoiceInput {
                 startedAt: session.startedAt,
                 endedAt: now,
                 speechStartedAt: session.speechStartedAt,
-                speechEndedAt: session.lastSpeechAt
+                speechEndedAt: session.lastSpeechAt,
+                prosody: ProsodyAnalyzer.analyze(session.timingGroups + [session.currentTimings])
             )
         session.continuation.resume(returning: utterance)
     }
@@ -163,21 +190,24 @@ final class SpeechInputService: VoiceInput {
         Task { @MainActor [weak self] in
             while true {
                 try? await Task.sleep(for: .milliseconds(200))
-                guard let self, self.session === session else { return }
+                guard let self, self.session === session, !session.isFinishing else { return }
                 let now = Date()
                 if let heard = session.finishCueHeardAt, now.timeIntervalSince(heard) >= 1.2 {
-                    self.complete(session)
+                    self.finish(session)
                     return
                 }
                 // Typing only: wait for the candidate to submit or tap Done.
                 guard self.isVoiceAvailable else { continue }
                 if let last = session.lastSpeechAt {
-                    if now.timeIntervalSince(last) >= session.request.silenceTimeout {
-                        self.complete(session)
+                    // How much silence ends the reply depends on whether it sounds finished.
+                    let isAnswer = session.request.purpose == .answer || session.request.purpose == .candidateQuestion
+                    let needed = EndOfTurnDetector.silenceNeeded(after: session.text, base: session.request.silenceTimeout, isAnswer: isAnswer)
+                    if now.timeIntervalSince(last) >= needed {
+                        self.finish(session)
                         return
                     }
                 } else if now.timeIntervalSince(session.startedAt) >= session.request.startTimeout {
-                    self.complete(session)
+                    self.finish(session)
                     return
                 }
             }
@@ -218,8 +248,8 @@ final class SpeechInputService: VoiceInput {
 
         recognitionGeneration += 1
         let generation = recognitionGeneration
-        let deliver: @Sendable (String?, Bool, Bool) -> Void = { [weak self] text, isFinal, failed in
-            Task { @MainActor in self?.handleRecognition(text: text, isFinal: isFinal, failed: failed, generation: generation) }
+        let deliver: @Sendable (String?, [WordTiming], Bool, Bool) -> Void = { [weak self] text, timings, isFinal, failed in
+            Task { @MainActor in self?.handleRecognition(text: text, timings: timings, isFinal: isFinal, failed: failed, generation: generation) }
         }
         recognitionRequest = request
         recognitionTask = recognizer.recognitionTask(with: request, resultHandler: Self.makeResultHandler(deliver))
@@ -237,8 +267,11 @@ final class SpeechInputService: VoiceInput {
         recognitionTask = nil
     }
 
-    private func handleRecognition(text: String?, isFinal: Bool, failed: Bool, generation: Int) {
+    private func handleRecognition(text: String?, timings: [WordTiming], isFinal: Bool, failed: Bool, generation: Int) {
         guard generation == recognitionGeneration, let session else { return }
+        if timings.contains(where: { $0.duration > 0 }) {
+            session.currentTimings = timings
+        }
 
         if let text, !text.isEmpty, text != session.current {
             session.current = text
@@ -253,9 +286,18 @@ final class SpeechInputService: VoiceInput {
         }
 
         if isFinal || failed {
-            // The recogniser stopped (final result, time limit or error). Keep the text and start a fresh task.
             session.committed = session.text
             session.current = ""
+            if !session.currentTimings.isEmpty {
+                session.timingGroups.append(session.currentTimings)
+                session.currentTimings = []
+            }
+            // We asked for this final result while finishing: the reply is complete.
+            if session.isFinishing {
+                complete(session)
+                return
+            }
+            // Otherwise the recogniser stopped by itself (time limit or error): keep listening with a fresh task.
             stopRecognition()
             guard session.restarts < 30 else { return }
             session.restarts += 1
@@ -284,9 +326,10 @@ final class SpeechInputService: VoiceInput {
         }
     }
 
-    nonisolated private static func makeResultHandler(_ deliver: @escaping @Sendable (String?, Bool, Bool) -> Void) -> (SFSpeechRecognitionResult?, Error?) -> Void {
+    nonisolated private static func makeResultHandler(_ deliver: @escaping @Sendable (String?, [WordTiming], Bool, Bool) -> Void) -> (SFSpeechRecognitionResult?, Error?) -> Void {
         { result, error in
-            deliver(result?.bestTranscription.formattedString, result?.isFinal ?? false, error != nil)
+            let timings = result?.bestTranscription.segments.map { WordTiming(start: $0.timestamp, duration: $0.duration) } ?? []
+            deliver(result?.bestTranscription.formattedString, timings, result?.isFinal ?? false, error != nil)
         }
     }
 

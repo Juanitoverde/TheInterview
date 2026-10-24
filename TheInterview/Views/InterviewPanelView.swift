@@ -168,6 +168,7 @@ struct InterviewPanelView: View {
         case .position: "Tell the receptionist which job you're applying for"
         case .readiness: "Answer the interviewer"
         case .answer: "Your answer. Say “that's my answer” or tap Done when finished"
+        case .candidateQuestion: "Ask the interviewer a question, or just say no thanks"
         case nil: "Listening"
         }
     }

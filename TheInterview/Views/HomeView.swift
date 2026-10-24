@@ -84,10 +84,10 @@ struct HomeView: View {
 
     private var aiStatus: some View {
         Group {
-            if model.hasAPIKey {
-                Label("Tailored questions and AI feedback with \(model.settings.openAIModel).", systemImage: "checkmark.seal")
+            if let ai = model.activeAIDescription {
+                Label("Tailored questions and AI feedback from \(ai).", systemImage: "checkmark.seal")
             } else {
-                Label("Offline mode: built-in questions and on-device scoring. Add an OpenAI API key in Settings for questions written for your role and AI feedback.", systemImage: "info.circle")
+                Label("Built-in questions and on-device scoring. Add an OpenAI API key in Settings, or use Apple Intelligence on visionOS 26, for questions written for your role and AI feedback.", systemImage: "info.circle")
             }
         }
         .font(.callout)

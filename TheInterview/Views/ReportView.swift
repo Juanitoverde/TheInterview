@@ -10,6 +10,9 @@ struct ReportView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     header
+                    if let breakdown = report.breakdown {
+                        BreakdownCard(breakdown: breakdown)
+                    }
                     statTiles
                     HStack(alignment: .top, spacing: 20) {
                         ListCard(title: "Strengths", systemImage: "hand.thumbsup", items: report.strengths)
@@ -17,6 +20,14 @@ struct ReportView: View {
                     }
                     FeedbackCard(title: "Eye contact", systemImage: "eye", text: report.eyeContact.feedback)
                     FeedbackCard(title: "Delivery", systemImage: "waveform", text: report.delivery.feedback)
+
+                    if let asked = report.candidateQuestions {
+                        ListCard(
+                            title: "Your questions for the interviewer",
+                            systemImage: "questionmark.bubble",
+                            items: asked.isEmpty ? ["You didn't ask any. Preparing one or two thoughtful questions shows genuine interest."] : asked
+                        )
+                    }
 
                     Text("Question by question")
                         .font(.title2.bold())
@@ -87,17 +98,22 @@ struct ReportView: View {
             StatTile(
                 label: "Speaking time",
                 value: formattedDuration(delivery.totalSpeakingSeconds),
-                detail: "\(delivery.totalWords) words"
+                detail: delivery.longPauseCount.map { "\(delivery.totalWords) words · \($0) long pause\($0 == 1 ? "" : "s")" } ?? "\(delivery.totalWords) words"
             )
+        }
+    }
+
+    private var analysisSourceText: String {
+        switch report.analysisSource {
+        case .openAI: "Feedback written by OpenAI (\(report.analysisModel ?? "model"))."
+        case .appleIntelligence: "Feedback written by Apple Intelligence on this device."
+        case .onDevice: "Scored on device."
         }
     }
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(
-                report.analysisSource == .openAI ? "Feedback written by OpenAI (\(report.analysisModel ?? "model"))." : "Scored on device.",
-                systemImage: report.analysisSource == .openAI ? "sparkles" : "cpu"
-            )
+            Label(analysisSourceText, systemImage: report.analysisSource == .onDevice ? "cpu" : "sparkles")
             if report.endedEarly {
                 Label("You ended this interview early.", systemImage: "flag.checkered")
             }
@@ -114,6 +130,43 @@ struct ReportView: View {
         }
         .font(.footnote)
         .foregroundStyle(.secondary)
+    }
+}
+
+/// How the overall score is made up: one meter per part, with its weight.
+private struct BreakdownCard: View {
+    let breakdown: ScoreBreakdown
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("How your score is made up", systemImage: "chart.bar.xaxis")
+                .font(.headline)
+            row("Answers", value: breakdown.content, weight: ScoreBreakdown.contentWeight)
+            row("Delivery", value: breakdown.delivery, weight: ScoreBreakdown.deliveryWeight)
+            row("Eye contact", value: breakdown.eyeContact, weight: ScoreBreakdown.eyeContactWeight)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(22)
+        .background(.regularMaterial, in: .rect(cornerRadius: 24))
+    }
+
+    private func row(_ label: String, value: Int?, weight: Double) -> some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+                Text(value == nil ? "Not measured" : "\(Int(weight * 100))% of the score")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 150, alignment: .leading)
+            ScoreMeter(value: value ?? 0, maximum: 100)
+                .opacity(value == nil ? 0.35 : 1)
+            Text(value.map { "\($0)" } ?? "–")
+                .font(.headline)
+                .frame(width: 44, alignment: .trailing)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

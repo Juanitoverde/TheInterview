@@ -74,13 +74,36 @@ final class AppModel {
         return saved
     }
 
-    private func makeClient() -> OpenAIClient? {
+    private func makeOpenAIClient() -> OpenAIClient? {
         Self.resolvedAPIKey().map { OpenAIClient(apiKey: $0, model: settings.openAIModel) }
+    }
+
+    /// The language model chosen by the provider setting, or nil for built-in rules only.
+    private func makeClient() -> (any LanguageModelClient)? {
+        let openAI: (any LanguageModelClient)? = makeOpenAIClient()
+        switch settings.aiProvider {
+        case .automatic: return openAI ?? AppleIntelligence.client()
+        case .openAI: return openAI
+        case .appleIntelligence: return AppleIntelligence.client()
+        case .builtIn: return nil
+        }
+    }
+
+    /// What will write questions and feedback, for display; nil means the built-in rules.
+    var activeAIDescription: String? {
+        switch settings.aiProvider {
+        case .builtIn: return nil
+        case .openAI: return hasAPIKey ? "OpenAI (\(settings.openAIModel))" : nil
+        case .appleIntelligence: return AppleIntelligence.isAvailable ? "Apple Intelligence on this device" : nil
+        case .automatic:
+            if hasAPIKey { return "OpenAI (\(settings.openAIModel))" }
+            return AppleIntelligence.isAvailable ? "Apple Intelligence on this device" : nil
+        }
     }
 
     /// Sends a tiny request to check the key and model. Returns an error message, or nil on success.
     func testOpenAIConnection() async -> String? {
-        guard let client = makeClient() else { return OpenAIError.missingAPIKey.localizedDescription }
+        guard let client = makeOpenAIClient() else { return OpenAIError.missingAPIKey.localizedDescription }
         do {
             try await client.verify()
             return nil
@@ -122,9 +145,9 @@ final class AppModel {
         let reactionGenerator: ReactionGenerating?
         let evaluator: InterviewEvaluating
         if let client = makeClient() {
-            questionGenerator = OpenAIQuestionGenerator(client: client)
-            reactionGenerator = OpenAIReactionGenerator(client: client)
-            evaluator = ResilientEvaluator(primary: OpenAIEvaluator(client: client))
+            questionGenerator = AIQuestionGenerator(client: client)
+            reactionGenerator = AIReactionGenerator(client: client)
+            evaluator = ResilientEvaluator(primary: AIEvaluator(client: client))
         } else {
             questionGenerator = OfflineQuestionGenerator()
             reactionGenerator = nil

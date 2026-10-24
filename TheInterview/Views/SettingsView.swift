@@ -19,6 +19,25 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
+                    Picker("Questions and feedback", selection: $model.settings.aiProvider) {
+                        ForEach(AIProvider.allCases) { provider in
+                            Text(provider.displayName).tag(provider)
+                        }
+                    }
+                    if let active = model.activeAIDescription {
+                        Label("Using \(active)", systemImage: "checkmark.circle")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Label("Using built-in questions and on-device scoring", systemImage: "cpu")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("AI")
+                } footer: {
+                    Text("Apple Intelligence runs on the device for free and keeps everything private. It needs visionOS 26 with Apple Intelligence turned on. OpenAI's models are larger and give richer feedback, but need an API key.")
+                }
+
+                Section {
                     SecureField(model.hasAPIKey ? "Replace the saved API key" : "OpenAI API key", text: $apiKeyDraft)
                         .textContentType(.password)
                         .autocorrectionDisabled()
@@ -98,7 +117,7 @@ struct SettingsView: View {
 
                 Section("Privacy") {
                     Text("Eye contact is estimated from the direction your head faces. visionOS doesn't share where your eyes look with apps.")
-                    Text("Speech is recognised on device when supported. Transcripts are sent to OpenAI only when an API key is saved. Reports are stored on this device.")
+                    Text("Speech is recognised on device when supported. Transcripts are sent to OpenAI only when it's the selected provider and an API key is saved; Apple Intelligence never leaves the device. Reports are stored on this device.")
                 }
                 .font(.callout)
                 .foregroundStyle(.secondary)

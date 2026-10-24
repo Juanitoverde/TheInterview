@@ -11,6 +11,7 @@ struct AppSettings: Codable, Equatable {
     var focus: InterviewFocus = .balanced
     var companyName = "Meridian Works"
     var openAIModel = OpenAIClient.defaultModel
+    var aiProvider: AIProvider = .automatic
     var usesAIReactions = true
     /// Lets the interviewer probe vague answers with follow-up questions.
     var asksFollowUpQuestions = true
@@ -28,7 +29,7 @@ struct AppSettings: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case candidateName, formOfAddress, presetPosition, questionCount, difficulty, focus, companyName, openAIModel
+        case candidateName, formOfAddress, presetPosition, questionCount, difficulty, focus, companyName, openAIModel, aiProvider
         case usesAIReactions, asksFollowUpQuestions, comfortMode, showsLiveEyeContact, speechRate, answerSilenceTimeout
     }
 
@@ -46,6 +47,7 @@ struct AppSettings: Codable, Equatable {
         focus = value(.focus, focus)
         companyName = value(.companyName, companyName)
         openAIModel = value(.openAIModel, openAIModel)
+        aiProvider = value(.aiProvider, aiProvider)
         usesAIReactions = value(.usesAIReactions, usesAIReactions)
         asksFollowUpQuestions = value(.asksFollowUpQuestions, asksFollowUpQuestions)
         comfortMode = value(.comfortMode, comfortMode)

@@ -28,7 +28,7 @@ struct ContentView: View {
                 StatusView(
                     systemImage: "chart.bar.doc.horizontal",
                     title: "Analyzing your interview…",
-                    message: model.hasAPIKey ? "Your answers are being reviewed. This usually takes a few seconds." : "Scoring your answers on device.",
+                    message: model.activeAIDescription.map { "Your answers are being reviewed by \($0). This usually takes a few seconds." } ?? "Scoring your answers on device.",
                     showsProgress: true
                 )
             case .report(let report):
