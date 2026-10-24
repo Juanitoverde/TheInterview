@@ -129,3 +129,14 @@ public struct QuestionBank: Sendable {
         text.replacingOccurrences(of: "{position}", with: position)
     }
 }
+
+/// Serves questions from the built-in bank; used when no OpenAI key is configured.
+public struct OfflineQuestionGenerator: QuestionGenerating {
+    private let bank = QuestionBank()
+
+    public init() {}
+
+    public func generateQuestions(for request: QuestionRequest) async throws -> [InterviewQuestion] {
+        bank.questions(for: request)
+    }
+}
